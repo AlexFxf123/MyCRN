@@ -165,7 +165,7 @@ class BEVDepthLightningModel(LightningModule):
 
     def __init__(self,
                  gpus: int = 1,
-                 data_root='data/nuScenes',
+                 data_root='/home/fxf/data/nuScenes',
                  eval_interval=1,
                  batch_size_per_device=8,
                  class_names=CLASSES,
@@ -209,9 +209,9 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = 'data/nuScenes/nuscenes_infos_train.pkl'
-        self.val_info_paths = 'data/nuScenes/nuscenes_infos_val.pkl'
-        self.predict_info_paths = 'data/nuScenes/nuscenes_infos_test.pkl'
+        self.train_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_train.pkl'
+        self.val_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl'
+        self.predict_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_test.pkl'
 
         self.return_image = True
         self.return_depth = True

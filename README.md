@@ -1,3 +1,9 @@
+# NMyCRN，根据个人使用修改
+在nuScenes数据集上运行CRN模型，调整子集的train和val
+read pkl是从生成的pkl文件中读取信息，并判断当前数据中是否存在相应sample的文件
+read nuscenes是从nuscenes数据集中读取信息，判断当前数据是否存在相应的sample文件，这里用了子集01，共85个scene，因此只循环100次，最终得到子集包含的scene信息
+splits是nuscenes自带的划分train和val的文件，这里根据子集的场景做新的划分
+
 # CRN: Camera Radar Net for Accurate, Robust, Efficient 3D Perception
 
 https://github.com/youngskkim/CRN/assets/24770858/1bf85a3a-ad22-4875-ab0c-deeee347b03f
@@ -93,6 +99,7 @@ CRN
 **Training**
 ```
 python [EXP_PATH] --amp_backend native -b 4 --gpus 4
+python ./exps/det/CRN_r18_256x704_128x128_4key.py，默认-amp_backend native -b 1 --gpus 1
 ```
 
 **Evaluation**  

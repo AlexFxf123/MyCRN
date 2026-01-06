@@ -356,5 +356,6 @@ class CRNLightningModel(BEVDepthLightningModel):
 
 
 if __name__ == '__main__':
-    run_cli(CRNLightningModel,
-            'det/CRN_r18_256x704_128x128_4key')
+    train_set = True
+    if train_set:
+        run_cli(CRNLightningModel, 'det/CRN_r18_256x704_128x128_4key')
