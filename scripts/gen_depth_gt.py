@@ -55,9 +55,9 @@ def map_pointcloud_to_image(
     return points, coloring
 
 
-data_root = 'data/nuScenes'
-INFO_PATHS = ['data/nuScenes/nuscenes_infos_train.pkl',
-              'data/nuScenes/nuscenes_infos_val.pkl']
+data_root = '/home/fxf/data/nuScenes'
+INFO_PATHS = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl',
+              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
 
 lidar_key = 'LIDAR_TOP'
 cam_keys = [

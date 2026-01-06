@@ -9,10 +9,12 @@ from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import view_points
 
 
-DATA_PATH = 'data/nuScenes'
+DATA_PATH = '/home/fxf/data/nuScenes'
 RADAR_SPLIT = 'radar_bev_filter'
 OUT_PATH = 'radar_pv_filter'
-info_paths = ['data/nuScenes/nuscenes_infos_train.pkl', 'data/nuScenes/nuscenes_infos_val.pkl']
+info_paths = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl', 
+              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
+
 
 # DATA_PATH = 'data/nuScenes/v1.0-test'
 # RADAR_SPLIT = 'radar_bev_filter_test'

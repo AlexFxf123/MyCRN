@@ -12,9 +12,10 @@ from nuscenes.utils.geometry_utils import transform_matrix, view_points
 
 
 SPLIT = 'v1.0-trainval'
-DATA_PATH = 'data/nuScenes'
-OUT_PATH = 'radar_bev_filter'
-info_paths = ['data/nuScenes/nuscenes_infos_train.pkl', 'data/nuScenes/nuscenes_infos_val.pkl']
+DATA_PATH = '/home/fxf/data/nuScenes/'
+OUT_PATH = '/home/fxf/data/nuScenes/radar_bev_filter'
+info_paths = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl', 
+              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
 
 # SPLIT = 'v1.0-test'
 # DATA_PATH = 'data/nuScenes/v1.0-test'
@@ -39,8 +40,7 @@ if DEBUG:
 #         x_rms y_rms invalid_state pdh0 vx_rms vy_rms
 SAVE_FIELDS = [0, 1, 2, 5, 8, 9, -1]  # x, y, z, rcs, vx_comp, vy_comp, (dummy field for sweep info)
 
-nusc = NuScenes(
-    version=SPLIT, dataroot=DATA_PATH, verbose=True)
+nusc = NuScenes(version=SPLIT, dataroot=DATA_PATH, verbose=True)
 
 if DISABLE_FILTER:
     # use all point
