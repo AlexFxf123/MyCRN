@@ -24,10 +24,10 @@ class CameraRadarNetDet(BaseBEVDepth):
 
     def __init__(self, backbone_img_conf, backbone_pts_conf, fuser_conf, head_conf):
         super(BaseBEVDepth, self).__init__()
-        self.backbone_img = RVTLSSFPN(**backbone_img_conf)
-        self.backbone_pts = PtsBackbone(**backbone_pts_conf)
-        self.fuser = MFAFuser(**fuser_conf)
-        self.head = BEVDepthHead(**head_conf)
+        self.backbone_img = RVTLSSFPN(**backbone_img_conf)              # 图像骨干网络
+        self.backbone_pts = PtsBackbone(**backbone_pts_conf)            # 点云骨干网络
+        self.fuser = MFAFuser(**fuser_conf)                             # 多模态特征融合模块        
+        self.head = BEVDepthHead(**head_conf)                           # 检测头
 
         self.radar_view_transform = backbone_img_conf['radar_view_transform']
 
