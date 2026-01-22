@@ -218,3 +218,6 @@ events.out.tfevents*
 
 # vim
 .vim
+
+# onnx
+*.onnx
