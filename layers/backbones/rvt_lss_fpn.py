@@ -165,6 +165,31 @@ class RVTLSSFPN(BaseLSSFPN):
     def __init__(self, **kwargs):
         super(RVTLSSFPN, self).__init__(**kwargs)
 
+        ####### 测试代码，查看模型结构
+        # dummy_input = torch.randn(1, 3, 224, 224)
+
+        # # 前向传播
+        # with torch.no_grad():
+        #     features = self.img_backbone(dummy_input)
+            
+        # # 计算模型参数总数
+        # total_params = sum(p.numel() for p in self.img_backbone.parameters())
+
+        # print(f"输入形状: {dummy_input.shape}")
+        # for i, feat in enumerate(features):
+        #     print(f"输出特征图{i+1}形状: {feat.shape}")
+        # print(f'模型参数总数: {total_params}')
+
+        # # 导出为onnx格式
+        # torch.onnx.export(
+        #     self.img_backbone,                          # 要导出的模型
+        #     dummy_input,                                # 模型的输入张量
+        #     "crn_img_backbone.onnx",                    # 导出文件名
+        #     export_params=True,                         # 是否导出训练好的参数
+        #     opset_version=11,                           # ONNX算子集版本
+        # )
+        ############  测试代码结束  #############
+
         self.register_buffer('frustum', self.create_frustum())
         self.z_bound = kwargs['z_bound']
         self.radar_view_transform = kwargs['radar_view_transform']
