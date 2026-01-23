@@ -275,6 +275,34 @@ class RVTLSSFPN(BaseLSSFPN):
         self.camera_aware = kwargs['camera_aware']
 
         self.depth_net = self._configure_depth_net(kwargs['depth_net_conf'])
+
+        ###### 测试代码，查看depth_net结构 ######
+        # dummy_input = torch.randn(1, kwargs['depth_net_conf']['in_channels'], 32, 32)
+        # mats_dict = {
+        #     'intrin_mats': torch.randn(1, 1, 6, 4, 4),
+        #     'ida_mats': torch.randn(1, 1, 6, 4, 4),
+        #     'sensor2ego_mats': torch.randn(1, 1, 6, 4, 4),
+        #     'bda_mat': torch.randn(1, 4, 4),
+        # }
+        # print("\n=== depth_net 模型结构 ===")
+        # print(self.depth_net)
+        # with torch.no_grad():
+        #     output = self.depth_net(dummy_input, mats_dict)
+                
+        # print(f"depth_net 输出形状: {output.shape}")
+        # total_params = sum(p.numel() for p in self.depth_net.parameters())
+        # print(f'depth_net 模型参数总数: {total_params}\n')
+        # # 导出为onnx格式
+        # torch.onnx.export(
+        #     self.depth_net,                          # 要导出的模型
+        #     (dummy_input, mats_dict),                # 模型的输入张量
+        #     "depth_net_rvt.onnx",                    # 导出文件名
+        #     export_params=True,                      # 是否导出训练好的参数
+        #     opset_version=11,                        # ONNX算子集版本
+        # )
+        ###### 测试代码结束 ######
+
+
         self.view_aggregation_net = ViewAggregation(self.output_channels*2,
                                                     self.output_channels*2,
                                                     self.output_channels)
