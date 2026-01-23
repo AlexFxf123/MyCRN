@@ -165,7 +165,7 @@ class RVTLSSFPN(BaseLSSFPN):
     def __init__(self, **kwargs):
         super(RVTLSSFPN, self).__init__(**kwargs)
 
-        ####### 测试代码，查看模型结构
+        ####### 测试img_backbone代码，查看模型结构 #######
         # dummy_input = torch.randn(1, 3, 224, 224)
 
         # # 前向传播
@@ -189,6 +189,85 @@ class RVTLSSFPN(BaseLSSFPN):
         #     opset_version=11,                           # ONNX算子集版本
         # )
         ############  测试代码结束  #############
+
+        ####### 测试img_neck代码，查看模型结构、前向传播、参数量及ONNX导出 #######
+        # 打印模型结构
+        # print("\n=== 模型结构 ===")
+        # print(self.img_neck)
+        
+        # # 1. 创建模拟输入
+        # batch_size = 2
+        # # 根据上采样步长推测输入特征图尺寸
+        # # 假设最终输出尺寸为32x32
+        # target_size = 32
+        # inputs = []
+        # for i, stride in enumerate(kwargs['img_neck_conf']['upsample_strides']):
+        #     if stride < 1.0:
+        #         # 下采样，输入尺寸较大
+        #         input_size = int(target_size / stride)
+        #     elif stride == 1.0:
+        #         # 保持原尺寸
+        #         input_size = target_size
+        #     else:  # stride > 1.0
+        #         # 上采样，输入尺寸较小
+        #         input_size = int(target_size / stride)
+            
+        #     input_tensor = torch.randn(batch_size, kwargs['img_neck_conf']['in_channels'][i], input_size, input_size)
+        #     inputs.append(input_tensor)
+        #     print(f"输入 {i}: {input_tensor.shape}")
+        
+        # # 2. 前向传播测试
+        # self.img_neck.eval()
+        # with torch.no_grad():
+        #     outputs = self.img_neck(inputs)
+        
+        # print("\n=== 前向传播结果 ===")
+        # for i, output in enumerate(outputs):
+        #     print(f"输出 {i}: {output.shape}")
+        #     print(f"  预期输出通道: {kwargs['img_neck_conf']['out_channels'][i]}")
+        
+        # # 3. 计算参数量
+        # total_params = sum(p.numel() for p in self.img_neck.parameters())
+        # trainable_params = sum(p.numel() for p in self.img_neck.parameters() if p.requires_grad)
+        
+        # print("\n=== 模型参数量 ===")
+        # print(f"总参数量: {total_params:,}")
+        # print(f"可训练参数量: {trainable_params:,}")
+        
+        # # 4. 导出为ONNX格式
+        # try:
+        #     # 为ONNX导出创建示例输入
+        #     dummy_inputs = []
+        #     for i, stride in enumerate(kwargs['img_neck_conf']['upsample_strides']):
+        #         if stride < 1.0:
+        #             input_size = int(32 / stride)
+        #         elif stride == 1.0:
+        #             input_size = 32
+        #         else:  # stride > 1.0
+        #             input_size = int(32 / stride)
+                
+        #         dummy_input = torch.randn(1, kwargs['img_neck_conf']['in_channels'][i], input_size, input_size)
+        #         dummy_inputs.append(dummy_input)
+            
+        #     # 导出ONNX模型
+        #     onnx_path = "second_fpn_img_neck.onnx"
+            
+        #     torch.onnx.export(
+        #         self.img_neck,
+        #         dummy_inputs,
+        #         onnx_path,
+        #         opset_version=11
+        #     )
+        #     print(f"\n=== ONNX导出成功 ===")
+        #     print(f"模型已保存至: {onnx_path}")     
+            
+        # except Exception as e:
+        #     print(f"\n=== ONNX导出失败 ===")
+        #     print(f"错误信息: {e}")
+        #     import traceback
+        #     traceback.print_exc()
+        ####### 测试代码结束  #######
+
 
         self.register_buffer('frustum', self.create_frustum())
         self.z_bound = kwargs['z_bound']
