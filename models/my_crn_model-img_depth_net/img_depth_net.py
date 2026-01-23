@@ -174,40 +174,49 @@ class DepthNet(nn.Module):
             depth = self.depth_conv(x)
 
         return torch.cat([depth, context], dim=1)
+
+def test_depth_net_model():
+    """测试DepthNet模型的完整功能"""
+    # 模型参数
+    in_channels = 256
+    mid_channels = 256
+    output_channels = 80
+    depth_channels = 70
+    camera_aware = False
     
-
-# 查看模型结构和参数量，导出onnx文件
-if __name__ == "__main__":
-
-    in_channels=256,                    # 输入通道数
-    mid_channels=256,                   # 中间通道数
-    camera_aware = False                # 是否使用相机感知模块 
-    output_channels = 80,               # 输出通道数
-    depth_channels = 80                 # 深度通道数
-    model = DepthNet(in_channels,
-                     mid_channels,
-                     output_channels,
-                     depth_channels,
+    print("=== 创建DepthNet模型 ===")
+    model = DepthNet(in_channels=in_channels,
+                     mid_channels=mid_channels,
+                     context_channels=output_channels,
+                     depth_channels=depth_channels,
                      camera_aware=camera_aware)
-    print(model)
-    # 统计模型参数量
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f'模型参数总数: {total_params}')
 
-    input_tensor = torch.randn(1, 256, 32, 32)  
+    dummy_input = torch.randn(1, in_channels, 32, 32)
     mats_dict = {
-            'intrin_mats': torch.randn(1, 1, 6, 4, 4),
-            'ida_mats': torch.randn(1, 1, 6, 4, 4),
-            'sensor2ego_mats': torch.randn(1, 1, 6, 4, 4),
-            'bda_mat': torch.randn(1, 4, 4),
-        }
-    print("Input shape:", input_tensor.shape)
+        'intrin_mats': torch.randn(1, 1, 6, 4, 4),
+        'ida_mats': torch.randn(1, 1, 6, 4, 4),
+        'sensor2ego_mats': torch.randn(1, 1, 6, 4, 4),
+        'bda_mat': torch.randn(1, 4, 4),
+    }
+    print("\n=== depth_net 模型结构 ===")
+    print(model)
+    with torch.no_grad():
+        output = model(dummy_input, mats_dict)
+            
+    print(f"depth_net 输出形状: {output.shape}")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f'depth_net 模型参数总数: {total_params}\n')
+    # 导出为onnx格式
+    torch.onnx.export(
+        model,                          # 要导出的模型
+        (dummy_input, mats_dict),                # 模型的输入张量
+        "depth_net_new.onnx",                    # 导出文件名
+        export_params=True,                      # 是否导出训练好的参数
+        opset_version=11,                        # ONNX算子集版本
+    )
 
-    output = model(input_tensor, mats_dict)
-    print("Output shape:", output.shape)
-    # 导出ONNX文件
-    torch.onnx.export(model,
-                      (input_tensor,mats_dict),
-                      "depth_net.onnx",
-                      export_params=True,
-                      opset_version=11)   
+# 主测试函数
+if __name__ == "__main__":
+    # 测试DepthNet模型
+    test_depth_net_model()
+    
