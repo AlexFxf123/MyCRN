@@ -30,10 +30,19 @@ class CRNModelWrapper(nn.Module):
         - mats: 相机参数字典，但ONNX需要拆分成独立张量
         - pts_pv: 雷达点云数据 [batch_size, num_sweeps, num_cams, num_points, features]
         """
+        # 确保所有输入都是float32类型
+        sweep_imgs = sweep_imgs.float()
+        pts_pv = pts_pv.float()
+        
+        # 确保mats中的所有张量都是float32类型
+        for key in mats:
+            if isinstance(mats[key], torch.Tensor):
+                mats[key] = mats[key].float()
+        
         # 将输入转换为模型期望的格式
         return self.model(sweep_imgs, mats, sweep_ptss=pts_pv, is_train=False)
 
-def create_mats_dict(batch_size=1, num_sweeps=1, num_cams=6):
+def create_mats_dict(batch_size=1, num_sweeps=1, num_cams=6, device='cuda'):
     """
     创建相机参数字典
     
@@ -41,20 +50,21 @@ def create_mats_dict(batch_size=1, num_sweeps=1, num_cams=6):
     - batch_size: 批次大小
     - num_sweeps: 雷达扫描次数
     - num_cams: 相机数量
+    - device: 设备类型 ('cuda' 或 'cpu')
     
     返回:
     - mats_dict: 包含所有相机参数的字典
     """
     # 根据CRN模型配置创建模拟的相机参数
     mats_dict = {
-        'intrin_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4),
-        'ida_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4),
-        'sensor2ego_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4),
-        'bda_mat': torch.randn(batch_size, 4, 4),
+        'intrin_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4, dtype=torch.float32, device=device),
+        'ida_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4, dtype=torch.float32, device=device),
+        'sensor2ego_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4, dtype=torch.float32, device=device),
+        'bda_mat': torch.randn(batch_size, 4, 4, dtype=torch.float32, device=device),
     }
     return mats_dict
 
-def create_dummy_inputs(batch_size=1, num_sweeps=1, num_cams=6, num_points=1000):
+def create_dummy_inputs(batch_size=1, num_sweeps=1, num_cams=6, num_points=1000, device='cuda'):
     """
     创建模拟输入数据
     
@@ -63,6 +73,7 @@ def create_dummy_inputs(batch_size=1, num_sweeps=1, num_cams=6, num_points=1000)
     - num_sweeps: 雷达扫描次数
     - num_cams: 相机数量
     - num_points: 每个雷达的点数
+    - device: 设备类型 ('cuda' 或 'cpu')
     
     返回:
     - sweep_imgs: 模拟图像数据
@@ -70,14 +81,14 @@ def create_dummy_inputs(batch_size=1, num_sweeps=1, num_cams=6, num_points=1000)
     - pts_pv: 模拟雷达点云数据
     """
     # 模拟图像数据: [batch_size, num_sweeps, num_cams, 3, 256, 704]
-    sweep_imgs = torch.randn(batch_size, num_sweeps, num_cams, 3, 256, 704)
+    sweep_imgs = torch.randn(batch_size, num_sweeps, num_cams, 3, 256, 704, dtype=torch.float32, device=device)
     
     # 模拟相机参数字典
-    mats_dict = create_mats_dict(batch_size, num_sweeps, num_cams)
+    mats_dict = create_mats_dict(batch_size, num_sweeps, num_cams, device)
     
     # 模拟雷达点云数据: [batch_size, num_sweeps, num_cams, num_points, features]
     # 假设每个点有5个特征: x, y, z, intensity, timestamp
-    pts_pv = torch.randn(batch_size, num_sweeps, num_cams, num_points, 5)
+    pts_pv = torch.randn(batch_size, num_sweeps, num_cams, num_points, 5, dtype=torch.float32, device=device)
     
     return sweep_imgs, mats_dict, pts_pv
 
@@ -85,7 +96,18 @@ def export_crn_model_to_onnx():
     """
     导出CRN模型为ONNX格式
     """
-    print("=== 开始导出CRN模型为ONNX格式 ===")
+    print("=== 开始在GPU上导出CRN模型为ONNX格式 ===")
+    
+    # 检查CUDA可用性
+    if not torch.cuda.is_available():
+        print("错误: CUDA不可用，无法在GPU上运行")
+        print("请检查您的CUDA安装和PyTorch配置")
+        return
+    
+    device = 'cuda'
+    print(f"使用设备: {device}")
+    print(f"GPU名称: {torch.cuda.get_device_name(0)}")
+    print(f"CUDA版本: {torch.version.cuda}")
     
     # 创建CRN模型
     print("1. 创建CRN模型...")
@@ -256,8 +278,44 @@ def export_crn_model_to_onnx():
             model_config['head_conf']
         )
         
+        # 关键修复：确保模型所有参数和缓冲区都是float32
+        # 1. 递归地将所有子模块转换为float32
+        def recursive_float32(module):
+            for child in module.children():
+                recursive_float32(child)
+            
+            # 转换当前模块的参数
+            for param in module.parameters(recurse=False):
+                param.data = param.data.float()
+            
+            # 转换当前模块的缓冲区
+            for buffer in module.buffers(recurse=False):
+                buffer.data = buffer.data.float()
+        
+        # 应用递归转换
+        crn_model.eval()
+        recursive_float32(crn_model)
+        
+        # 2. 确保模型是float32类型
+        crn_model = crn_model.float()
+        
+        # 3. 将模型移动到GPU
+        crn_model = crn_model.to(device)
+        
+        # 4. 禁用混合精度训练
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        
         print(f"模型创建成功")
         print(f"模型参数总数: {sum(p.numel() for p in crn_model.parameters()):,}")
+        print(f"模型数据类型: {next(crn_model.parameters()).dtype}")
+        print(f"模型所在设备: {next(crn_model.parameters()).device}")
+        
+        # 检查模型所有参数的数据类型
+        for name, param in crn_model.named_parameters():
+            if param.dtype != torch.float32:
+                print(f"警告: 参数 {name} 的数据类型是 {param.dtype}，正在转换为float32")
+                param.data = param.data.float()
         
     except Exception as e:
         print(f"模型创建失败: {e}")
@@ -279,12 +337,13 @@ def export_crn_model_to_onnx():
         batch_size=batch_size,
         num_sweeps=num_sweeps,
         num_cams=num_cams,
-        num_points=num_points
+        num_points=num_points,
+        device=device
     )
     
     print(f"输入数据形状:")
-    print(f"  sweep_imgs: {sweep_imgs.shape}")
-    print(f"  pts_pv: {pts_pv.shape}")
+    print(f"  sweep_imgs: {sweep_imgs.shape}, dtype: {sweep_imgs.dtype}, device: {sweep_imgs.device}")
+    print(f"  pts_pv: {pts_pv.shape}, dtype: {pts_pv.dtype}, device: {pts_pv.device}")
     
     # 测试模型前向传播
     print("4. 测试模型前向传播...")
@@ -297,11 +356,11 @@ def export_crn_model_to_onnx():
         if isinstance(output, tuple):
             for i, out in enumerate(output):
                 if torch.is_tensor(out):
-                    print(f"  输出 {i}: {out.shape}")
+                    print(f"  输出 {i}: {out.shape}, dtype: {out.dtype}, device: {out.device}")
                 else:
                     print(f"  输出 {i}: 非张量")
         else:
-            print(f"  输出: {output.shape}")
+            print(f"  输出: {output.shape}, dtype: {output.dtype}, device: {output.device}")
             
     except Exception as e:
         print(f"模型前向传播测试失败: {e}")
@@ -311,7 +370,7 @@ def export_crn_model_to_onnx():
     
     # 导出ONNX模型
     print("5. 导出ONNX模型...")
-    onnx_path = "crn_model_fixed_v2.onnx"
+    onnx_path = "crn_model_gpu.onnx"
     
     try:
         # 由于CRN模型有多个输出，我们需要创建一个包装器来处理
@@ -323,13 +382,13 @@ def export_crn_model_to_onnx():
             def forward(self, sweep_imgs, intrin_mats, ida_mats, sensor2ego_mats, bda_mat, pts_pv):
                 # 组装mats字典
                 mats = {
-                    'intrin_mats': intrin_mats,
-                    'ida_mats': ida_mats,
-                    'sensor2ego_mats': sensor2ego_mats,
-                    'bda_mat': bda_mat
+                    'intrin_mats': intrin_mats.float(),
+                    'ida_mats': ida_mats.float(),
+                    'sensor2ego_mats': sensor2ego_mats.float(),
+                    'bda_mat': bda_mat.float()
                 }
                 # 调用模型
-                output = self.model(sweep_imgs, mats, pts_pv)
+                output = self.model(sweep_imgs.float(), mats, pts_pv.float())
                 
                 # 如果输出是元组，将其展开
                 if isinstance(output, tuple):
@@ -340,6 +399,9 @@ def export_crn_model_to_onnx():
         # 创建导出包装器
         export_wrapper = ONNXExportWrapper(wrapped_model)
         export_wrapper.eval()
+        
+        # 确保导出包装器也在GPU上
+        export_wrapper = export_wrapper.to(device)
         
         # 准备ONNX输入
         dummy_inputs = (
@@ -370,7 +432,8 @@ def export_crn_model_to_onnx():
                 'pts_pv': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams', 3: 'num_points'},
                 'output': {0: 'batch_size'}
             },
-            verbose=False
+            verbose=False,
+            do_constant_folding=True
         )
         
         print(f"ONNX导出成功: {onnx_path}")
@@ -385,6 +448,10 @@ if __name__ == "__main__":
     # 设置随机种子以保证可重复性
     torch.manual_seed(42)
     np.random.seed(42)
+    
+    # 禁用自动混合精度
+    torch.backends.cudnn.enabled = False
+    torch.set_grad_enabled(False)
     
     # 导出CRN模型
     export_crn_model_to_onnx()

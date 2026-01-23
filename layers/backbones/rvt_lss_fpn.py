@@ -354,11 +354,11 @@ class RVTLSSFPN(BaseLSSFPN):
              points[:, :, :, :, :, 2:]), 5)
 
         combine = sensor2ego_mat.matmul(torch.inverse(intrin_mat)).double()
-        points = combine.view(batch_size, num_cams, 1, 1, 1, 4,
-                              4).matmul(points).half()
+        # 将原来half()改为float(),以避免生成onnx文件时的精度问题
+        # points = combine.view(batch_size, num_cams, 1, 1, 1, 4, 4).matmul(points).half()
+        points = combine.view(batch_size, num_cams, 1, 1, 1, 4, 4).matmul(points).float()
         if bda_mat is not None:
-            bda_mat = bda_mat.unsqueeze(1).repeat(1, num_cams, 1, 1).view(
-                batch_size, num_cams, 1, 1, 1, 4, 4)
+            bda_mat = bda_mat.unsqueeze(1).repeat(1, num_cams, 1, 1).view(batch_size, num_cams, 1, 1, 1, 4, 4)
             points = (bda_mat @ points).squeeze(-1)
         else:
             points = points.squeeze(-1)

@@ -38,10 +38,11 @@ class AverageVoxelPooling(Function):
         batch_size = input_features.shape[0]
         num_points = input_features.shape[1]
         num_channels = input_features.shape[2]
-        output_features = input_features.new_zeros(batch_size, voxel_num[1],
-                                                   voxel_num[0], num_channels)
-        output_num = input_features.new_zeros(batch_size, voxel_num[1],
-                                              voxel_num[0], 1)
+        # output_features = input_features.new_zeros(batch_size, voxel_num[1], voxel_num[0], num_channels)
+        # output_num = input_features.new_zeros(batch_size, voxel_num[1].item(), voxel_num[0].item(), 1)
+        # 修复问题，将张量转为int类型，避免生成onnx时出错
+        output_features = input_features.new_zeros(batch_size, int(voxel_num[1]), int(voxel_num[0]), num_channels)
+        output_num = input_features.new_zeros(batch_size, int(voxel_num[1]), int(voxel_num[0]), 1)
         ctx.mark_non_differentiable(output_num)
 
         # Save the position of bev_feature_map for each input point.
