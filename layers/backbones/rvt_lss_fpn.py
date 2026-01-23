@@ -306,6 +306,29 @@ class RVTLSSFPN(BaseLSSFPN):
         self.view_aggregation_net = ViewAggregation(self.output_channels*2,
                                                     self.output_channels*2,
                                                     self.output_channels)
+        
+        ##### 测试view_aggregation_net代码，查看模型结构 #######
+        # dummy_input = torch.randn(1, self.output_channels*2, 32, 32)  
+        # print("\n=== view_aggregation_net 模型结构 ===")
+        # print(self.view_aggregation_net)
+        # with torch.no_grad():
+        #     output = self.view_aggregation_net(dummy_input) 
+        # print(f"view_aggregation_net 输出形状: {output.shape}")
+        # total_params = sum(p.numel() for p in self.view_aggregation_net.parameters())
+        # print(f'view_aggregation_net 模型参数总数: {total_params}\n')
+        # # 导出为onnx格式
+        # torch.onnx.export(
+        #     self.view_aggregation_net,               # 要导出的模型
+        #     dummy_input,                             # 模型的输入张量
+        #     "view_aggregation_net_rvt.onnx",        # 导出文件名
+        #     export_params=True,                      # 是否导出训练好的参数
+        #     opset_version=11,                        # ONNX算子集版本
+        # )
+        #####  测试代码结束  #######
+
+
+
+        test = 1  # 用于打断点
 
     def _configure_depth_net(self, depth_net_conf):
         return DepthNet(
