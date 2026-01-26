@@ -1,61 +1,64 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import torch
 import torch.nn as nn
 import numpy as np
 import sys
 import os
 
-# 添加项目路径
+# Add project path
 sys.path.append('/home/fxf/projects/MyCRN')
 
-# 导入必要的模块
+# Import necessary modules
 from models.camera_radar_net_det import CameraRadarNetDet
 from exps.det.CRN_r18_256x704_128x128_4key import CRNLightningModel
 
 class CRNModelWrapper(nn.Module):
     """
-    CRN模型包装器，用于导出ONNX格式
-    将复杂的输入参数封装为模型期望的格式
+    CRN model wrapper for ONNX export
+    Convert complex input parameters to model expected format
     """
     def __init__(self, crn_model):
         super(CRNModelWrapper, self).__init__()
         self.model = crn_model
-        self.eval()  # 设置为评估模式
+        self.eval()  # Set to evaluation mode
     
     def forward(self, sweep_imgs, mats, pts_pv):
         """
-        前向传播函数，适配ONNX导出
+        Forward function for ONNX export
         
-        参数:
-        - sweep_imgs: 图像数据 [batch_size, num_sweeps, num_cams, 3, H, W]
-        - mats: 相机参数字典，但ONNX需要拆分成独立张量
-        - pts_pv: 雷达点云数据 [batch_size, num_sweeps, num_cams, num_points, features]
+        Args:
+        - sweep_imgs: image data [batch_size, num_sweeps, num_cams, 3, H, W]
+        - mats: camera parameter dict, but ONNX needs separate tensors
+        - pts_pv: radar point cloud data [batch_size, num_sweeps, num_cams, num_points, features]
         """
-        # 确保所有输入都是float32类型
+        # Ensure all inputs are float32
         sweep_imgs = sweep_imgs.float()
         pts_pv = pts_pv.float()
         
-        # 确保mats中的所有张量都是float32类型
+        # Ensure all tensors in mats are float32
         for key in mats:
             if isinstance(mats[key], torch.Tensor):
                 mats[key] = mats[key].float()
         
-        # 将输入转换为模型期望的格式
+        # Convert input to model expected format
         return self.model(sweep_imgs, mats, sweep_ptss=pts_pv, is_train=False)
 
 def create_mats_dict(batch_size=1, num_sweeps=1, num_cams=6, device='cuda'):
     """
-    创建相机参数字典
+    Create camera parameter dict
     
-    参数:
-    - batch_size: 批次大小
-    - num_sweeps: 雷达扫描次数
-    - num_cams: 相机数量
-    - device: 设备类型 ('cuda' 或 'cpu')
+    Args:
+    - batch_size: batch size
+    - num_sweeps: number of radar sweeps
+    - num_cams: number of cameras
+    - device: device type ('cuda' or 'cpu')
     
-    返回:
-    - mats_dict: 包含所有相机参数的字典
+    Returns:
+    - mats_dict: dict containing all camera parameters
     """
-    # 根据CRN模型配置创建模拟的相机参数
+    # Create simulated camera parameters based on CRN model config
     mats_dict = {
         'intrin_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4, dtype=torch.float32, device=device),
         'ida_mats': torch.randn(batch_size, num_sweeps, num_cams, 4, 4, dtype=torch.float32, device=device),
@@ -66,57 +69,76 @@ def create_mats_dict(batch_size=1, num_sweeps=1, num_cams=6, device='cuda'):
 
 def create_dummy_inputs(batch_size=1, num_sweeps=1, num_cams=6, num_points=1000, device='cuda'):
     """
-    创建模拟输入数据
+    Create dummy input data
     
-    参数:
-    - batch_size: 批次大小
-    - num_sweeps: 雷达扫描次数
-    - num_cams: 相机数量
-    - num_points: 每个雷达的点数
-    - device: 设备类型 ('cuda' 或 'cpu')
+    Args:
+    - batch_size: batch size
+    - num_sweeps: number of radar sweeps
+    - num_cams: number of cameras
+    - num_points: number of points per radar
+    - device: device type ('cuda' or 'cpu')
     
-    返回:
-    - sweep_imgs: 模拟图像数据
-    - mats_dict: 模拟相机参数字典
-    - pts_pv: 模拟雷达点云数据
+    Returns:
+    - sweep_imgs: simulated image data
+    - mats_dict: simulated camera parameter dict
+    - pts_pv: simulated radar point cloud data
     """
-    # 模拟图像数据: [batch_size, num_sweeps, num_cams, 3, 256, 704]
+    # Simulated image data: [batch_size, num_sweeps, num_cams, 3, 256, 704]
     sweep_imgs = torch.randn(batch_size, num_sweeps, num_cams, 3, 256, 704, dtype=torch.float32, device=device)
     
-    # 模拟相机参数字典
+    # Simulated camera parameter dict
     mats_dict = create_mats_dict(batch_size, num_sweeps, num_cams, device)
     
-    # 模拟雷达点云数据: [batch_size, num_sweeps, num_cams, num_points, features]
-    # 假设每个点有5个特征: x, y, z, intensity, timestamp
+    # Simulated radar point cloud data: [batch_size, num_sweeps, num_cams, num_points, features]
+    # Assume each point has 5 features: x, y, z, intensity, timestamp
     pts_pv = torch.randn(batch_size, num_sweeps, num_cams, num_points, 5, dtype=torch.float32, device=device)
     
     return sweep_imgs, mats_dict, pts_pv
 
 def export_crn_model_to_onnx():
     """
-    导出CRN模型为ONNX格式
+    Export CRN model to ONNX format
     """
-    print("=== 开始在GPU上导出CRN模型为ONNX格式 ===")
+    print("=== Start exporting CRN model to ONNX format ===")
     
-    # 检查CUDA可用性
+    # Check CUDA availability
     if not torch.cuda.is_available():
-        print("错误: CUDA不可用，无法在GPU上运行")
-        print("请检查您的CUDA安装和PyTorch配置")
+        print("Error: CUDA not available, cannot run on GPU")
+        print("Please check your CUDA installation and PyTorch configuration")
         return
     
     device = 'cuda'
-    print(f"使用设备: {device}")
-    print(f"GPU名称: {torch.cuda.get_device_name(0)}")
-    print(f"CUDA版本: {torch.version.cuda}")
+    print(f"Using device: {device}")
+    print(f"GPU name: {torch.cuda.get_device_name(0)}")
+    print(f"CUDA version: {torch.version.cuda}")
     
-    # 创建CRN模型
-    print("1. 创建CRN模型...")
+    # Check PyTorch version
+    print(f"PyTorch version: {torch.__version__}")
     
-    # 加载预训练的CRN模型
-    # 注意：这里假设您有训练好的模型权重文件
-    # 如果没有，可以使用随机初始化的权重进行测试
+    # Get current PyTorch version supported ONNX opset version
     try:
-        # 尝试从配置创建模型
+        # Convert producer_version to integer
+        producer_version_str = torch.onnx.producer_version
+        print(f"ONNX opset support: Current PyTorch supports opset 7-{producer_version_str}")
+        
+        # Try to convert to integer, if fails use default
+        try:
+            producer_version_int = int(producer_version_str)
+        except (ValueError, TypeError):
+            print(f"Warning: Cannot convert producer_version '{producer_version_str}' to integer, using default 11")
+            producer_version_int = 11
+    except AttributeError:
+        print(f"Warning: torch.onnx.producer_version not found, using default 11")
+        producer_version_int = 11
+    
+    # Create CRN model
+    print("1. Creating CRN model...")
+    
+    # Load pre-trained CRN model
+    # Note: Assuming you have trained model weight files
+    # If not, you can use randomly initialized weights for testing
+    try:
+        # Try to create model from config
         model_config = {
             'backbone_img_conf': {
                 'x_bound': [-51.2, 51.2, 0.8],
@@ -270,7 +292,7 @@ def export_crn_model_to_onnx():
             }
         }
         
-        # 创建CRN模型
+        # Create CRN model
         crn_model = CameraRadarNetDet(
             model_config['backbone_img_conf'],
             model_config['backbone_pts_conf'],
@@ -278,56 +300,56 @@ def export_crn_model_to_onnx():
             model_config['head_conf']
         )
         
-        # 关键修复：确保模型所有参数和缓冲区都是float32
-        # 1. 递归地将所有子模块转换为float32
+        # Key fix: Ensure all model parameters and buffers are float32
+        # 1. Recursively convert all submodules to float32
         def recursive_float32(module):
             for child in module.children():
                 recursive_float32(child)
             
-            # 转换当前模块的参数
+            # Convert current module's parameters
             for param in module.parameters(recurse=False):
                 param.data = param.data.float()
             
-            # 转换当前模块的缓冲区
+            # Convert current module's buffers
             for buffer in module.buffers(recurse=False):
                 buffer.data = buffer.data.float()
         
-        # 应用递归转换
+        # Apply recursive conversion
         crn_model.eval()
         recursive_float32(crn_model)
         
-        # 2. 确保模型是float32类型
+        # 2. Ensure model is float32 type
         crn_model = crn_model.float()
         
-        # 3. 将模型移动到GPU
+        # 3. Move model to GPU
         crn_model = crn_model.to(device)
         
-        # 4. 禁用混合精度训练
+        # 4. Disable mixed precision training
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
         
-        print(f"模型创建成功")
-        print(f"模型参数总数: {sum(p.numel() for p in crn_model.parameters()):,}")
-        print(f"模型数据类型: {next(crn_model.parameters()).dtype}")
-        print(f"模型所在设备: {next(crn_model.parameters()).device}")
+        print(f"Model created successfully")
+        print(f"Total model parameters: {sum(p.numel() for p in crn_model.parameters()):,}")
+        print(f"Model data type: {next(crn_model.parameters()).dtype}")
+        print(f"Model device: {next(crn_model.parameters()).device}")
         
-        # 检查模型所有参数的数据类型
+        # Check data type of all model parameters
         for name, param in crn_model.named_parameters():
             if param.dtype != torch.float32:
-                print(f"警告: 参数 {name} 的数据类型是 {param.dtype}，正在转换为float32")
+                print(f"Warning: Parameter {name} data type is {param.dtype}, converting to float32")
                 param.data = param.data.float()
         
     except Exception as e:
-        print(f"模型创建失败: {e}")
+        print(f"Model creation failed: {e}")
         return
     
-    # 创建模型包装器
-    print("2. 创建模型包装器...")
+    # Create model wrapper
+    print("2. Creating model wrapper...")
     wrapped_model = CRNModelWrapper(crn_model)
     wrapped_model.eval()
     
-    # 创建模拟输入
-    print("3. 创建模拟输入...")
+    # Create dummy inputs
+    print("3. Creating dummy inputs...")
     batch_size = 1
     num_sweeps = 1
     num_cams = 6
@@ -341,69 +363,68 @@ def export_crn_model_to_onnx():
         device=device
     )
     
-    print(f"输入数据形状:")
+    print(f"Input data shapes:")
     print(f"  sweep_imgs: {sweep_imgs.shape}, dtype: {sweep_imgs.dtype}, device: {sweep_imgs.device}")
     print(f"  pts_pv: {pts_pv.shape}, dtype: {pts_pv.dtype}, device: {pts_pv.device}")
     
-    # 测试模型前向传播
-    print("4. 测试模型前向传播...")
+    # Test model forward propagation
+    print("4. Testing model forward propagation...")
     try:
         with torch.no_grad():
-            # 注意：这里需要将mats_dict作为参数传递
+            # Note: mats_dict needs to be passed as parameter
             output = wrapped_model(sweep_imgs, mats_dict, pts_pv)
         
-        print(f"模型前向传播测试成功")
+        print(f"Model forward propagation test successful")
         if isinstance(output, tuple):
             for i, out in enumerate(output):
                 if torch.is_tensor(out):
-                    print(f"  输出 {i}: {out.shape}, dtype: {out.dtype}, device: {out.device}")
+                    print(f"  Output {i}: {out.shape}, dtype: {out.dtype}, device: {out.device}")
                 else:
-                    print(f"  输出 {i}: 非张量")
+                    print(f"  Output {i}: non-tensor")
         else:
-            print(f"  输出: {output.shape}, dtype: {output.dtype}, device: {output.device}")
+            print(f"  Output: {output.shape}, dtype: {output.dtype}, device: {output.device}")
             
     except Exception as e:
-        print(f"模型前向传播测试失败: {e}")
+        print(f"Model forward propagation test failed: {e}")
         import traceback
         traceback.print_exc()
         return
     
-    # 导出ONNX模型
-    print("5. 导出ONNX模型...")
-    onnx_path = "crn_model_gpu.onnx"
+    # Export ONNX model
+    print("5. Exporting ONNX model...")
     
     try:
-        # 由于CRN模型有多个输出，我们需要创建一个包装器来处理
+        # Since CRN model has multiple outputs, we need to create a wrapper to handle it
         class ONNXExportWrapper(nn.Module):
             def __init__(self, model):
                 super(ONNXExportWrapper, self).__init__()
                 self.model = model
             
             def forward(self, sweep_imgs, intrin_mats, ida_mats, sensor2ego_mats, bda_mat, pts_pv):
-                # 组装mats字典
+                # Assemble mats dictionary
                 mats = {
                     'intrin_mats': intrin_mats.float(),
                     'ida_mats': ida_mats.float(),
                     'sensor2ego_mats': sensor2ego_mats.float(),
                     'bda_mat': bda_mat.float()
                 }
-                # 调用模型
+                # Call model
                 output = self.model(sweep_imgs.float(), mats, pts_pv.float())
                 
-                # 如果输出是元组，将其展开
+                # If output is a tuple, expand it
                 if isinstance(output, tuple):
                     return output
                 else:
                     return (output,)
         
-        # 创建导出包装器
+        # Create export wrapper
         export_wrapper = ONNXExportWrapper(wrapped_model)
         export_wrapper.eval()
         
-        # 确保导出包装器也在GPU上
+        # Ensure export wrapper is also on GPU
         export_wrapper = export_wrapper.to(device)
         
-        # 准备ONNX输入
+        # Prepare ONNX inputs
         dummy_inputs = (
             sweep_imgs,
             mats_dict['intrin_mats'],
@@ -413,45 +434,124 @@ def export_crn_model_to_onnx():
             pts_pv
         )
         
-        # 导出ONNX
-        torch.onnx.export(
-            export_wrapper,
-            dummy_inputs,
-            onnx_path,
-            export_params=True,
-            opset_version=11,
-            input_names=['sweep_imgs', 'intrin_mats', 'ida_mats', 
-                        'sensor2ego_mats', 'bda_mat', 'pts_pv'],
-            output_names=['output'],
-            dynamic_axes={
-                'sweep_imgs': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams'},
-                'intrin_mats': {0: 'batch_size', 1: 'num_sweeps'},
-                'ida_mats': {0: 'batch_size', 1: 'num_sweeps'},
-                'sensor2ego_mats': {0: 'batch_size', 1: 'num_sweeps'},
-                'bda_mat': {0: 'batch_size'},
-                'pts_pv': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams', 3: 'num_points'},
-                'output': {0: 'batch_size'}
-            },
-            verbose=False,
-            do_constant_folding=True
-        )
+        # Try opset versions from 9 to 13 (inverse operation introduced in opset 9)
+        min_opset = 9
+        # We'll try up to 13, but we know 13 might fail
+        max_opset = min(13, producer_version_int)  # Now both are integers
         
-        print(f"ONNX导出成功: {onnx_path}")
-        print(f"模型已保存到: {os.path.abspath(onnx_path)}")
+        print(f"PyTorch supported opset range: 7-{producer_version_int}")
+        print(f"Trying opset versions from {min_opset} to {max_opset}")
+        
+        # First try default export type, then try ONNX_FALLTHROUGH if needed
+        operator_export_types = [torch.onnx.OperatorExportTypes.ONNX]
+        operator_export_types.append(torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH)
+        
+        export_success = False
+        last_error = None
+        successful_opset = None
+        successful_export_type = None
+        successful_path = None
+        
+        for operator_export_type in operator_export_types:
+            if export_success:
+                break
+            for opset_version in range(min_opset, max_opset + 1):
+                try:
+                    onnx_path = f"crn_model_opset_{opset_version}.onnx"
+                    if operator_export_type != torch.onnx.OperatorExportTypes.ONNX:
+                        onnx_path = f"crn_model_opset_{opset_version}_fallthrough.onnx"
+                    
+                    print(f"Trying opset version {opset_version} with operator_export_type {operator_export_type}...")
+                    
+                    torch.onnx.export(
+                        export_wrapper,
+                        dummy_inputs,
+                        onnx_path,
+                        export_params=True,
+                        opset_version=opset_version,
+                        operator_export_type=operator_export_type,
+                        input_names=['sweep_imgs', 'intrin_mats', 'ida_mats', 
+                                    'sensor2ego_mats', 'bda_mat', 'pts_pv'],
+                        output_names=['output'],
+                        dynamic_axes={
+                            'sweep_imgs': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams'},
+                            'intrin_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                            'ida_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                            'sensor2ego_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                            'bda_mat': {0: 'batch_size'},
+                            'pts_pv': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams', 3: 'num_points'},
+                            'output': {0: 'batch_size'}
+                        },
+                        verbose=False,
+                        do_constant_folding=True
+                    )
+                    
+                    print(f"ONNX export successful: {onnx_path}")
+                    print(f"Model saved to: {os.path.abspath(onnx_path)}")
+                    
+                    export_success = True
+                    successful_opset = opset_version
+                    successful_export_type = operator_export_type
+                    successful_path = onnx_path
+                    break
+                    
+                except Exception as e:
+                    last_error = e
+                    print(f"Failed with opset {opset_version} and operator_export_type {operator_export_type}: {e}")
+                    continue
+        
+        if export_success:
+            print(f"\nExport successful!")
+            print(f"Successful opset version: {successful_opset}")
+            print(f"Successful export type: {successful_export_type}")
+            print(f"Model saved as: {successful_path}")
+        else:
+            print(f"\nAll opset versions failed. Last error: {last_error}")
+            print(f"Tried opset versions from {min_opset} to {max_opset}")
+            
+            # Try one more time with opset 11 (common version)
+            print("\nTrying one more time with opset 11 (common supported version)...")
+            try:
+                torch.onnx.export(
+                    export_wrapper,
+                    dummy_inputs,
+                    "crn_model_final_attempt.onnx",
+                    export_params=True,
+                    opset_version=11,
+                    input_names=['sweep_imgs', 'intrin_mats', 'ida_mats', 
+                                'sensor2ego_mats', 'bda_mat', 'pts_pv'],
+                    output_names=['output'],
+                    dynamic_axes={
+                        'sweep_imgs': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams'},
+                        'intrin_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                        'ida_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                        'sensor2ego_mats': {0: 'batch_size', 1: 'num_sweeps'},
+                        'bda_mat': {0: 'batch_size'},
+                        'pts_pv': {0: 'batch_size', 1: 'num_sweeps', 2: 'num_cams', 3: 'num_points'},
+                        'output': {0: 'batch_size'}
+                    },
+                    verbose=True,  # Set to True to see more details
+                    do_constant_folding=True
+                )
+                print(f"ONNX export successful with opset 11: crn_model_final_attempt.onnx")
+            except Exception as e:
+                print(f"Final attempt with opset 11 also failed: {e}")
+                import traceback
+                traceback.print_exc()
         
     except Exception as e:
-        print(f"ONNX导出失败: {e}")
+        print(f"ONNX export setup failed: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # 设置随机种子以保证可重复性
+    # Set random seed for reproducibility
     torch.manual_seed(42)
     np.random.seed(42)
     
-    # 禁用自动混合精度
+    # Disable auto mixed precision
     torch.backends.cudnn.enabled = False
     torch.set_grad_enabled(False)
     
-    # 导出CRN模型
+    # Export CRN model
     export_crn_model_to_onnx()
