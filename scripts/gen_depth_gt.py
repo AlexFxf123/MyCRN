@@ -56,8 +56,9 @@ def map_pointcloud_to_image(
 
 
 data_root = '/home/fxf/data/nuScenes'
-INFO_PATHS = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl',
-              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
+MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+INFO_PATHS = [f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl',
+              f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl']
 
 lidar_key = 'LIDAR_TOP'
 cam_keys = [
@@ -98,14 +99,14 @@ def worker(info):
         file_name = os.path.split(info['cam_infos'][cam_key]['filename'])[-1]
         np.concatenate([pts_img[:2, :].T, depth[:, None]],
                        axis=1).astype(np.float32).flatten().tofile(
-                           os.path.join(data_root, 'depth_gt',
+                           os.path.join(MYCRN_DATA, 'depth_gt',
                                         f'{file_name}.bin'))
     # plt.savefig(f"{sample_idx}")
 
 
 if __name__ == '__main__':
     po = Pool(24)
-    mmcv.mkdir_or_exist(os.path.join(data_root, 'depth_gt'))
+    mmcv.mkdir_or_exist(os.path.join(MYCRN_DATA, 'depth_gt'))
     for info_path in INFO_PATHS:
         infos = mmcv.load(info_path)
         for info in infos:

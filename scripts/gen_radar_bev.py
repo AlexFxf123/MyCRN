@@ -13,9 +13,10 @@ from nuscenes.utils.geometry_utils import transform_matrix, view_points
 
 SPLIT = 'v1.0-trainval'
 DATA_PATH = '/home/fxf/data/nuScenes/'
-OUT_PATH = '/home/fxf/data/nuScenes/radar_bev_filter'
-info_paths = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl', 
-              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
+MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+OUT_PATH = f'{MYCRN_DATA}/radar_bev_filter'
+info_paths = [f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl', 
+              f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl']
 
 # SPLIT = 'v1.0-test'
 # DATA_PATH = 'data/nuScenes/v1.0-test'
@@ -132,7 +133,7 @@ def worker(info):
     points = points[mask, :]
 
     file_name = os.path.split(info['lidar_infos']['LIDAR_TOP']['filename'])[-1]
-    points.tofile(os.path.join(DATA_PATH, OUT_PATH, file_name))
+    points.tofile(os.path.join(OUT_PATH, file_name))
 
     if DEBUG:
         fig, ax = plt.subplots(figsize=(12, 12))

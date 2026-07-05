@@ -44,6 +44,9 @@ crashlytics.properties
 crashlytics-build.properties
 fabric.properties
 
+# MyCRN generated data (pkl, depth_gt, radar_*, etc.)
+data/
+
 # Editor-based Rest Client
 .idea/httpRequests
 

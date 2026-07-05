@@ -54,10 +54,7 @@ python setup.py develop  # GPU required
 ### Data preparation
 **Step 0.** Download [nuScenes dataset](https://www.nuscenes.org/nuscenes#download).
 
-**Step 1.** Symlink the dataset folder to `/home/fxf/data/nuScenes/`.
-```
-ln -s [nuscenes root] /home/fxf/data/nuScenes/
-```
+**Step 1.** 已创建符号链接 `/home/fxf/data/nuScenes` → `/home/fxf/data/nuScenes-full`
 
 **Step 2.** Create annotation file. 
 This will generate `nuscenes_infos_{train,val}.pkl`.
@@ -81,31 +78,76 @@ python scripts/gen_radar_pv.py  # transform to camera coords
 
 The folder structure will be as follows:
 ```
-CRN
-├── data
-│   ├── nuScenes
-│   │   ├── nuscenes_infos_train.pkl
-│   │   ├── nuscenes_infos_val.pkl
-│   │   ├── maps
-│   │   ├── samples
-│   │   ├── sweeps
-|   |   ├── depth_gt
-|   |   ├── radar_bev_filter  # temporary folder, safe to delete
-|   |   ├── radar_pv_filter
-|   |   ├── v1.0-trainval
+/home/fxf/data/nuScenes/  →  symlink to nuScenes-full (仅原始数据)
+├── maps
+├── samples
+├── v1.0-trainval
+
+MyCRN/data/  (生成文件)
+├── info/                        ← 由 gen_info.py 生成
+│   ├── nuscenes_infos_train.pkl
+│   └── nuscenes_infos_val.pkl
+├── depth_gt/                    ← 由 gen_depth_gt.py 生成
+└── radar_pv_filter/             ← 由 gen_radar_pv.py 生成
 ```
 
 ### Training and Evaluation
-**Training**
+
+输出目录结构：
 ```
-python [EXP_PATH] --amp_backend native -b 4 --gpus 4
-python ./exps/det/CRN_r18_256x704_128x128_4key.py，默认-amp_backend native -b 1 --gpus 1
+outputs/
+├── r18/          ← CRN_r18 训练输出
+├── r50/          ← CRN_r50 训练输出
+└── bevdepth/     ← BEVDepth_r50 训练输出
+```
+
+运行模式说明：
+| 参数 | 模式 | 说明 |
+|------|------|------|
+| `--train` (或无参数) | **训练** | 默认模式，从零开始训练 |
+| `--resume` | **恢复训练** | 从 `outputs/` 中最新的 checkpoint 恢复 |
+| `-e` | **评估** | 需要 `--ckpt_path` 或 output dir 中有已训练的 checkpoint |
+| `-p` | **预测** | 同评估，输出预测结果 |
+
+**常用参数说明：**
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-b`, `--batch-size` | `1` | 每张卡的 batch size |
+| `--max-epochs` | `24` | 训练轮数 |
+| `--gpus` | `1` | GPU 数量 |
+| `--resume` | - | 从最新 checkpoint 恢复训练 |
+| `--train` | - | 训练模式（默认） |
+| `-e` | - | 评估模式 |
+| `--ckpt_path` | - | 指定 checkpoint 路径 |
+
+**Training (from scratch)**
+```
+# CRN-R18 (batch_size=1, 24 epochs, 1 GPU)
+python ./exps/det/CRN_r18_256x704_128x128_4key.py -b 1 --gpus 1
+
+# CRN-R18 (自定义 batch size 和 epoch 数)
+python ./exps/det/CRN_r18_256x704_128x128_4key.py -b 4 --gpus 4 --max-epochs 50
+
+# CRN-R50
+python ./exps/det/CRN_r50_256x704_128x128_4key.py -b 4 --gpus 4
+
+# BEVDepth-R50
+python ./exps/det/BEVDepth_r50_256x704_128x128_4key.py -b 4 --gpus 4
+```
+
+**Resume training (从最近的 checkpoint 恢复)**
+```
+python ./exps/det/CRN_r18_256x704_128x128_4key.py --resume -b 1 --gpus 1
 ```
 
 **Evaluation**  
 *Note: use `-b 1 --gpus 1` to measure inference time.*
 ```
-python [EXP_PATH] --ckpt_path [CKPT_PATH] -e -b 4 --gpus 4
+# 指定 checkpoint 评估
+python ./exps/det/CRN_r18_256x704_128x128_4key.py -e --ckpt_path ./outputs/r18/epoch=23-step=100000.ckpt -b 4 --gpus 4
+
+# 自动使用 output dir 中最新的 checkpoint
+python ./exps/det/CRN_r18_256x704_128x128_4key.py -e -b 4 --gpus 4
 ```
 
 ## Model Zoo

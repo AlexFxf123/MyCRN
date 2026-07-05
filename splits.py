@@ -229,14 +229,14 @@ def create_splits_scenes(verbose: bool = False) -> Dict[str, List[str]]:
     # Use hard-coded splits.
     all_scenes = train + val + test
     assert len(all_scenes) == 1000 and len(set(all_scenes)) == 1000, 'Error: Splits incomplete!'
-    # 默认全集场景
-    # scene_splits = {'train': train, 'val': val, 'test': test,
-    #                 'mini_train': mini_train, 'mini_val': mini_val,
-    #                 'train_detect': train_detect, 'train_track': train_track}
-    # 修改为使用子集trainval01
-    scene_splits = {'train': train01, 'val': val01, 'test': test,
+    # 默认全集场景 (700训练 + 150验证 + 150测试)
+    scene_splits = {'train': train, 'val': val, 'test': test,
                     'mini_train': mini_train, 'mini_val': mini_val,
                     'train_detect': train_detect, 'train_track': train_track}
+    # 如需使用子集 train01/val01 (85场景)，取消下面注释并注释上面
+    # scene_splits = {'train': train01, 'val': val01, 'test': test,
+    #                 'mini_train': mini_train, 'mini_val': mini_val,
+    #                 'train_detect': train_detect, 'train_track': train_track}
 
     # Optional: Print scene-level stats.
     if verbose:

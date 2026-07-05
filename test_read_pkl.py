@@ -2,11 +2,13 @@
 import os
 import pickle
 
+MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+
 # 方法1: 使用with语句自动处理文件关闭
-with open('/home/fxf/data/nuScenes/nuscenes_infos_train.pkl', 'rb') as f:
+with open(f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl', 'rb') as f:
     train_data = pickle.load(f)
 
-with open('/home/fxf/data/nuScenes/nuscenes_infos_val.pkl', 'rb') as f:
+with open(f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl', 'rb') as f:
     val_data = pickle.load(f)
 root_path = '/home/fxf/data/nuScenes/'
 count = 0               # 总帧数

@@ -8,7 +8,7 @@ import sys
 import os
 
 # Add project path
-sys.path.append('/home/fxf/projects/MyCRN')
+sys.path.append('/home/fxf/projects/BEV_Projects/MyCRN')
 
 # Import necessary modules
 from models.camera_radar_net_det import CameraRadarNetDet

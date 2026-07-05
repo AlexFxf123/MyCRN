@@ -10,10 +10,11 @@ from nuscenes.utils.geometry_utils import view_points
 
 
 DATA_PATH = '/home/fxf/data/nuScenes'
-RADAR_SPLIT = 'radar_bev_filter'
-OUT_PATH = 'radar_pv_filter'
-info_paths = ['/home/fxf/data/nuScenes/nuscenes_infos_train.pkl', 
-              '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl']
+MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+RADAR_SPLIT = f'{MYCRN_DATA}/radar_bev_filter'
+OUT_PATH = f'{MYCRN_DATA}/radar_pv_filter'
+info_paths = [f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl', 
+              f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl']
 
 
 # DATA_PATH = 'data/nuScenes/v1.0-test'
@@ -83,7 +84,7 @@ def map_pointcloud_to_image(
 
 def worker(info):
     radar_file_name = os.path.split(info['lidar_infos']['LIDAR_TOP']['filename'])[-1]
-    points = np.fromfile(os.path.join(DATA_PATH, RADAR_SPLIT, radar_file_name),
+    points = np.fromfile(os.path.join(RADAR_SPLIT, radar_file_name),
                          dtype=np.float32,
                          count=-1).reshape(-1, 7)
 
@@ -114,13 +115,13 @@ def worker(info):
         file_name = os.path.split(info['cam_infos'][cam_key]['filename'])[-1]
         np.concatenate([pts_img[:2, :].T, features_img],
                        axis=1).astype(np.float32).flatten().tofile(
-                           os.path.join(DATA_PATH, OUT_PATH,
+                           os.path.join(OUT_PATH,
                                         f'{file_name}.bin'))
     # plt.savefig(f"{sample_idx}")
 
 
 if __name__ == '__main__':
-    mmcv.mkdir_or_exist(os.path.join(DATA_PATH, OUT_PATH))
+    mmcv.mkdir_or_exist(OUT_PATH)
     for info_path in info_paths:
         infos = mmcv.load(info_path)
         for info in tqdm(infos):

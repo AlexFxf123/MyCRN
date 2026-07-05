@@ -163,6 +163,8 @@ class BEVDepthLightningModel(LightningModule):
                          if name.islower() and not name.startswith('__')
                          and callable(models.__dict__[name]))
 
+    MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+
     def __init__(self,
                  gpus: int = 1,
                  data_root='/home/fxf/data/nuScenes',
@@ -193,7 +195,8 @@ class BEVDepthLightningModel(LightningModule):
         mmcv.mkdir_or_exist(default_root_dir)
         self.default_root_dir = default_root_dir
         self.evaluator = DetNuscEvaluator(class_names=self.class_names,
-                                          output_dir=self.default_root_dir)
+                                          output_dir=self.default_root_dir,
+                                          data_root=self.data_root)
         self.model = BaseBEVDepth(self.backbone_img_conf,
                                   self.head_conf)
         self.mode = 'valid'
@@ -209,9 +212,9 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_train.pkl'
-        self.val_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl'
-        self.predict_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_test.pkl'
+        self.train_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_train.pkl'
+        self.val_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_val.pkl'
+        self.predict_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_test_sweep.pkl'
 
         self.return_image = True
         self.return_depth = True
@@ -412,8 +415,8 @@ class BEVDepthLightningModel(LightningModule):
             return_depth=self.return_depth,
             return_radar_pv=self.return_radar_pv,
             remove_z_axis=self.remove_z_axis,
-            depth_path='depth_gt',
-            radar_pv_path='radar_pv_filter'
+            depth_path=self.MYCRN_DATA + '/depth_gt',
+            radar_pv_path=self.MYCRN_DATA + '/radar_pv_filter'
         )
 
         train_loader = torch.utils.data.DataLoader(
@@ -449,7 +452,7 @@ class BEVDepthLightningModel(LightningModule):
             return_depth=self.return_depth,
             return_radar_pv=self.return_radar_pv,
             remove_z_axis=self.remove_z_axis,
-            radar_pv_path='radar_pv_filter',
+            radar_pv_path=self.MYCRN_DATA + '/radar_pv_filter',
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
@@ -486,7 +489,7 @@ class BEVDepthLightningModel(LightningModule):
             return_depth=self.return_depth,
             return_radar_pv=self.return_radar_pv,
             remove_z_axis=self.remove_z_axis,
-            radar_pv_path='radar_pv_filter',
+            radar_pv_path=self.MYCRN_DATA + '/radar_pv_filter',
         )
         predict_loader = torch.utils.data.DataLoader(
             predict_dataset,

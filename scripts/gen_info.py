@@ -146,19 +146,23 @@ def generate_info(nusc, scenes, max_cam_sweeps=6, max_lidar_sweeps=10):
     return infos
 
 
+MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
+
+
 def main():
     trainval_nusc = NuScenes(version='v1.0-trainval',
                              dataroot='/home/fxf/data/nuScenes/',
                              verbose=True)
-    # 这里是使用子集
-    train_scenes = splits.train01
-    val_scenes = splits.val01
+    # 使用全集划分 (700训练 + 150验证)
+    train_scenes = splits.train
+    val_scenes = splits.val
     # train_infos_tiny = generate_info(trainval_nusc, train_scenes[:2])
-    # mmcv.dump(train_infos_tiny, '/home/fxf/data/nuScenes//nuscenes_infos_train-tiny.pkl')
+    # mmcv.dump(train_infos_tiny, f'{MYCRN_DATA}/info/nuscenes_infos_train-tiny.pkl')
+    mmcv.mkdir_or_exist(f'{MYCRN_DATA}/info')
     train_infos = generate_info(trainval_nusc, train_scenes)
-    mmcv.dump(train_infos, '/home/fxf/data/nuScenes/nuscenes_infos_train.pkl')
+    mmcv.dump(train_infos, f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl')
     val_infos = generate_info(trainval_nusc, val_scenes)
-    mmcv.dump(val_infos, '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl')
+    mmcv.dump(val_infos, f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl')
 
     # test_nusc = NuScenes(version='v1.0-test',
     #                      dataroot='./data/nuScenes/v1.0-test/',

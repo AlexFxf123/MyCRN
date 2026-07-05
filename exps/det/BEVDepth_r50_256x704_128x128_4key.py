@@ -275,5 +275,4 @@ class BEVDepthLightningModel(BaseBEVDepthLightningModel):
 
 
 if __name__ == '__main__':
-    run_cli(BEVDepthLightningModel,
-            'det/BEVDepth_r50_256x704_128x128_4key')
+    run_cli(BEVDepthLightningModel, 'bevdepth')
