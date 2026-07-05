@@ -424,7 +424,7 @@ class BEVDepthLightningModel(LightningModule):
             batch_size=self.batch_size_per_device,
             num_workers=4,
             drop_last=True,
-            shuffle=False,
+            shuffle=True,
             collate_fn=partial(collate_fn,
                                is_return_image=self.return_image,
                                is_return_depth=self.return_depth,
