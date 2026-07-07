@@ -456,6 +456,7 @@ class BEVDepthLightningModel(LightningModule):
             return_depth=self.return_depth,
             return_radar_pv=self.return_radar_pv,
             remove_z_axis=self.remove_z_axis,
+            depth_path=self.MYCRN_DATA + '/depth_gt',
             radar_pv_path=self.MYCRN_DATA + '/radar_pv_filter',
         )
         val_loader = torch.utils.data.DataLoader(
@@ -493,6 +494,7 @@ class BEVDepthLightningModel(LightningModule):
             return_depth=self.return_depth,
             return_radar_pv=self.return_radar_pv,
             remove_z_axis=self.remove_z_axis,
+            depth_path=self.MYCRN_DATA + '/depth_gt',
             radar_pv_path=self.MYCRN_DATA + '/radar_pv_filter',
         )
         predict_loader = torch.utils.data.DataLoader(
