@@ -247,6 +247,124 @@ def create_splits_scenes(verbose: bool = False) -> Dict[str, List[str]]:
     return scene_splits
 
 
+
+
+# ===== 基于目标类别分布的均衡子集生成 =====
+# 分析各场景中每个类别的目标数量，用贪心算法选取子集，
+# 使子集的类别比例与全集尽可能一致。
+# 目标: train ≤ 233 (700//3), val ≤ 50 (150//3)
+
+SUBJECT_TRAIN_NUM = 233
+SUBJECT_VAL_NUM = 50
+NUSC_DATAROOT = '/home/fxf/data/nuScenes/'
+
+
+def analyze_scene_classes(nusc, scene_names):
+    """统计每个场景中各类别目标数量。"""
+    from collections import Counter
+    scene_stats = {}
+    for scene_name in scene_names:
+        cur = [s for s in nusc.scene if s['name'] == scene_name]
+        if not cur:
+            continue
+        cur = cur[0]
+        counts = Counter()
+        sample = nusc.get('sample', cur['first_sample_token'])
+        while True:
+            for ann_token in sample['anns']:
+                ann = nusc.get('sample_annotation', ann_token)
+                cat = ann['category_name'].split('.')[0]
+                counts[cat] += 1
+            if sample['next'] == '':
+                break
+            sample = nusc.get('sample', sample['next'])
+        scene_stats[scene_name] = counts
+    return scene_stats
+
+
+def greedy_select(scene_stats, target_count, target_dist):
+    """贪心选取场景，使累计类别分布最接近目标分布。"""
+    from collections import Counter
+    selected = []
+    remaining = list(scene_stats.keys())
+    current = Counter()
+
+    for _ in range(min(target_count, len(remaining))):
+        best_score = float('inf')
+        best_scene = None
+        for scene in remaining:
+            hypo = current + scene_stats[scene]
+            total = sum(hypo.values())
+            if total == 0:
+                continue
+            score = sum(abs(hypo.get(c, 0) / total - target_dist.get(c, 0))
+                        for c in target_dist)
+            if score < best_score:
+                best_score = score
+                best_scene = scene
+        if best_scene is None:
+            break
+        selected.append(best_scene)
+        remaining.remove(best_scene)
+        current += scene_stats[best_scene]
+
+    return sorted(selected)
+
+
+def create_balanced_subset(verbose=True, nusc=None):
+    """基于目标分布均衡选取子集。"""
+    from collections import Counter
+    from nuscenes.nuscenes import NuScenes
+
+    if nusc is None:
+        nusc = NuScenes(version='v1.0-trainval',
+                        dataroot=NUSC_DATAROOT, verbose=False)
+
+    print('分析训练集 700 scenes...')
+    train_stats = analyze_scene_classes(nusc, train)
+    train_dist = sum(train_stats.values(), Counter())
+    train_ratio = {k: v / sum(train_dist.values())
+                   for k, v in train_dist.items()}
+
+    print('分析验证集 150 scenes...')
+    val_stats = analyze_scene_classes(nusc, val)
+    val_dist = sum(val_stats.values(), Counter())
+    val_ratio = {k: v / sum(val_dist.values())
+                 for k, v in val_dist.items()}
+
+    print(f'\n贪心选取 {SUBJECT_TRAIN_NUM} 训练场景...')
+    sub_train = greedy_select(train_stats, SUBJECT_TRAIN_NUM, train_ratio)
+
+    print(f'贪心选取 {SUBJECT_VAL_NUM} 验证场景...')
+    sub_val = greedy_select(val_stats, SUBJECT_VAL_NUM, val_ratio)
+
+    sub_train_dist = sum((train_stats[s] for s in sub_train), Counter())
+    sub_val_dist = sum((val_stats[s] for s in sub_val), Counter())
+
+    if verbose:
+        print(f'\n===== 子集统计 =====')
+        print(f'训练: {len(sub_train)} 场景 (原 700)')
+        print(f'验证: {len(sub_val)} 场景 (原 150)')
+        print(f'\n训练集类别分布 (全集 → 子集):')
+        for cat, cnt in train_dist.most_common():
+            sc = sub_train_dist.get(cat, 0)
+            print(f'  {cat:20s}: {cnt:5d} → {sc:5d}  ({sc/max(cnt,1):.0%})')
+        print(f'\n验证集类别分布 (全集 → 子集):')
+        for cat, cnt in val_dist.most_common():
+            sc = sub_val_dist.get(cat, 0)
+            print(f'  {cat:20s}: {cnt:5d} → {sc:5d}  ({sc/max(cnt,1):.0%})')
+
+        print(f'\n# === 复制到 gen_info.py 替换 train_scenes / val_scenes ===')
+        print(f'train_scenes = {sub_train}')
+        print(f'val_scenes = {sub_val}')
+        print('# ===============================================')
+
+    return sub_train, sub_val
+
 if __name__ == '__main__':
-    # Print the scene-level stats.
-    create_splits_scenes(verbose=True)
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == 'subset':
+        create_balanced_subset()
+    else:
+        # Print the scene-level stats.
+        create_splits_scenes(verbose=True)

@@ -150,26 +150,32 @@ MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
 
 
 def main():
-    trainval_nusc = NuScenes(version='v1.0-trainval',
-                             dataroot='/home/fxf/data/nuScenes/',
-                             verbose=True)
-    # 使用全集划分 (700训练 + 150验证)
-    train_scenes = splits.train
-    val_scenes = splits.val
-    # train_infos_tiny = generate_info(trainval_nusc, train_scenes[:2])
-    # mmcv.dump(train_infos_tiny, f'{MYCRN_DATA}/info/nuscenes_infos_train-tiny.pkl')
+    from test_splits import create_balanced_subset, train, val
+
+    nusc = NuScenes(version='v1.0-trainval',
+                    dataroot='/home/fxf/data/nuScenes/',
+                    verbose=True)
     mmcv.mkdir_or_exist(f'{MYCRN_DATA}/info')
-    train_infos = generate_info(trainval_nusc, train_scenes)
+
+    # ===== 1. 全集 pkl (700 train + 150 val) =====
+    print('\n====== 生成全集 pkl ======')
+    train_infos = generate_info(nusc, train)
     mmcv.dump(train_infos, f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl')
-    val_infos = generate_info(trainval_nusc, val_scenes)
+    val_infos = generate_info(nusc, val)
     mmcv.dump(val_infos, f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl')
 
-    # test_nusc = NuScenes(version='v1.0-test',
-    #                      dataroot='./data/nuScenes/v1.0-test/',
-    #                      verbose=True)
-    # test_scenes = splits.test
-    # test_infos = generate_info(test_nusc, test_scenes)
-    # mmcv.dump(test_infos, './data/nuScenes/nuscenes_infos_test.pkl')
+    # ===== 2. 均衡子集 pkl (~233 train + ~50 val) =====
+    print('\n====== 生成均衡子集 pkl ======')
+    sub_train, sub_val = create_balanced_subset(nusc=nusc, verbose=False)
+    sub_train_infos = generate_info(nusc, sub_train)
+    mmcv.dump(sub_train_infos,
+              f'{MYCRN_DATA}/info/nuscenes_infos_sub_train.pkl')
+    sub_val_infos = generate_info(nusc, sub_val)
+    mmcv.dump(sub_val_infos,
+              f'{MYCRN_DATA}/info/nuscenes_infos_sub_val.pkl')
+
+    print(f'\n✅ 全集: train {len(train_infos)} / val {len(val_infos)} 样本')
+    print(f'✅ 子集: train {len(sub_train_infos)} / val {len(sub_val_infos)} 样本')
 
 
 if __name__ == '__main__':
