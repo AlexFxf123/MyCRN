@@ -176,7 +176,10 @@ else:
 # =====================================================================
 # 5. 推理速度测试
 # =====================================================================
-print_sep("[5/5] 推理速度测试")
+print_sep("[5/5] 推理延时分析 (CUDA Profiler, FP32)")
+import time, warnings
+warnings.filterwarnings('ignore')
+
 model = CRNLightningModel(data_mode='sub')
 model = model.to(device).eval()
 B, S, C = 1, 1, 6
@@ -186,14 +189,80 @@ mats = {'intrin_mats':torch.randn(B,S,C,4,4,device=device),
         'ida_mats':torch.randn(B,S,C,4,4,device=device),
         'sensor2ego_mats':torch.randn(B,S,C,4,4,device=device),
         'bda_mat':torch.randn(B,4,4,device=device)}
-for _ in range(5): _ = model.model(imgs, mats, sweep_ptss=pts, is_train=False)
-torch.cuda.synchronize()
-import time
-start = time.time()
-for _ in range(50): _ = model.model(imgs, mats, sweep_ptss=pts, is_train=False)
-torch.cuda.synchronize()
-t = (time.time() - start) / 50
+
+# 总推理速度
+with torch.no_grad():
+    for _ in range(10): _ = model.model(imgs, mats, sweep_ptss=pts, is_train=False)
+    torch.cuda.synchronize()
+    start = time.time()
+    for _ in range(50): _ = model.model(imgs, mats, sweep_ptss=pts, is_train=False)
+    torch.cuda.synchronize()
+    t = (time.time() - start) / 50
+print(f"\n  总推理: {t*1000:.1f} ms  ({1/t:.1f} FPS)  [FP32]")
+
+# CUDA Profiler 逐算子分析
+with torch.no_grad():
+    for _ in range(5): model.model(imgs, mats, sweep_ptss=pts, is_train=False)
+    torch.cuda.synchronize()
+
+with torch.profiler.profile(
+    activities=[torch.profiler.ProfilerActivity.CUDA],
+    record_shapes=False,
+) as prof:
+    for _ in range(5):
+        model.model(imgs, mats, sweep_ptss=pts, is_train=False)
+    torch.cuda.synchronize()
+
+del model
+
+from collections import defaultdict
+op_times = defaultdict(float)
+op_counts = defaultdict(int)
+for e in prof.events():
+    if e.self_cuda_time_total > 0:
+        name = e.name.split('(')[0].split('::')[-1].split('.')[-1][:48]
+        ms = e.self_cuda_time_total / 1000
+        op_times[name] += ms
+        op_counts[name] += e.count
+
+total_p = sum(op_times.values())
+print(f"\n{'算子':<50s} {'耗时(ms)':>10s} {'调用':>6s} {'占比':>7s}")
+print("-" * 77)
+# 归类输出：先输出主要类别算子
+categories = {
+    '卷积 (Conv/GEMM)': ['cutlass_tensorop', 'sm80_xmma_fprop', 'implicit_convolve',
+                        'precomputed_convolve', 'winograd'],
+    '归一化 (BN/Activation)': ['bn_fw_inf', 'relu', 'nchwToNhwc', 'nhwcToNchw'],
+    '注意力 (Deformable Attn)': ['ms_deformable'],
+    '体素化 (Voxelization)': ['point_to_voxelidx', 'determin_voxel_num'],
+    '其他算子': [],
+}
+cat_times = {}
+for cat, keywords in categories.items():
+    t_cat = 0
+    for name, t in list(op_times.items()):
+        if any(k in name.lower() for k in keywords):
+            t_cat += t
+    cat_times[cat] = t_cat
+
+for name, t in sorted(op_times.items(), key=lambda x: -x[1]):
+    if t < 0.15 and name in op_times:
+        # 归入"其他"
+        continue
+    print(f"  {name:<48s} {t:>8.2f} {op_counts[name]:>4d} {t/total_p*100:>6.1f}%")
+
+# 其他小算子的汇总
+other_sum = sum(t for n, t in op_times.items() if t < 0.15)
+other_cnt = sum(op_counts[n] for n, t in op_times.items() if t < 0.15)
+if other_sum > 0:
+    print(f"  {'<其他小算子>':<48s} {other_sum:>8.2f} {other_cnt:>4d} {other_sum/total_p*100:>6.1f}%")
+print("-" * 77)
+print(f"  {'CUDA Kernel 总计':<48s} {total_p:>8.2f} {'':>4s}")
+
+print(f"\n  类别汇总:")
+for cat, t in cat_times.items():
+    print(f"    {cat:<20s} {t:>8.2f} ms ({t/total_p*100:.1f}%)")
+print(f"    {'Kernel 总计':<20s} {total_p:>8.2f} ms")
 print(f"  单次推理: {t*1000:.1f} ms")
-print(f"  理论 FPS: {1/t:.1f}")
 
 print(f"\n{'='*60}\n✅ 全部完成!")
