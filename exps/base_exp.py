@@ -214,8 +214,8 @@ class BEVDepthLightningModel(LightningModule):
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
         self.data_mode = data_mode
-        suffix = 'sub' if data_mode == 'sub' else ''
-        infix = f'_{suffix}' if suffix else ''
+        mode_map = {'sub': '_sub', 'mini': '_mini', 'full': ''}
+        infix = mode_map.get(data_mode, '')
         self.train_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos{infix}_train.pkl'
         self.val_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos{infix}_val.pkl'
         self.predict_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_test_sweep.pkl'
@@ -358,9 +358,10 @@ class BEVDepthLightningModel(LightningModule):
         self.log('val/bbox', torch.mean(torch.stack(bbox_losses)), on_epoch=True)
         self.log('val/depth', torch.mean(torch.stack(depth_losses)), on_epoch=True)
 
-        # 每 eval_interval 个 epoch 跑一次完整评估
+        # 每 eval_interval 个 epoch 跑一次 mAP/NDS 评估
         if self._do_eval and len(self._val_results) > 0:
-            print(f'\n[Eval] Epoch {self.current_epoch}: running full evaluation...')
+            mode_name = {'full': '全集', 'sub': '均衡子集', 'mini': 'mini'}.get(self.data_mode, self.data_mode)
+            print(f'\n[Eval] Epoch {self.current_epoch}: running {mode_name} evaluation...')
             synchronize()
             if self.global_rank == 0:
                 self.evaluator.evaluate(self._val_results, self._val_metas)
@@ -546,8 +547,8 @@ class BEVDepthLightningModel(LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):  # pragma: no-cover
         parent_parser.add_argument('--data_mode', type=str, default='sub',
-                                   choices=['full', 'sub'],
-                                   help="Dataset mode: 'full' (全集) or 'sub' (均衡子集, 默认)")
+                                   choices=['full', 'sub', 'mini'],
+                                   help="Dataset mode: 'full' (全集), 'sub' (均衡子集, 默认), 'mini' (mini子集)")
         parent_parser.add_argument('--eval_interval', type=int, default=5,
                                    help='Run full evaluation every N epochs (default: 5)')
         return parent_parser

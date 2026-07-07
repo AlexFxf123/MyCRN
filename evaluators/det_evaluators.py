@@ -92,13 +92,66 @@ class DetNuscEvaluator():
             'v1.0-mini': 'mini_val',
             'v1.0-trainval': 'val',
         }
-        nusc_eval = NuScenesEval(nusc,
-                                 config=self.eval_detection_configs,
-                                 result_path=result_path,
-                                 eval_set=eval_set_map[self.version],
-                                 output_dir=output_dir,
-                                 verbose=False)
-        nusc_eval.main(render_curves=False)
+        eval_set = eval_set_map[self.version]
+        output_dir = osp.join(*osp.split(result_path)[:-1])
+
+        # 加载预测结果，检查 token 是否匹配
+        import json
+        with open(result_path, 'r') as f:
+            pred_results = json.load(f)
+        pred_tokens = set(pred_results['results'].keys())
+
+        # 根据预测结果的实际场景确定 GT token 列表
+        # (NuScenesEval 的 load_gt 使用 create_splits_scenes() 可能返回自定义子集)
+        pred_scene_names = set()
+        for s in nusc.sample:
+            if s['token'] in pred_tokens:
+                scene = nusc.get('scene', s['scene_token'])
+                pred_scene_names.add(scene['name'])
+        gt_tokens = set()
+        for s in nusc.sample:
+            scene = nusc.get('scene', s['scene_token'])
+            if scene['name'] in pred_scene_names:
+                gt_tokens.add(s['token'])
+
+        # 补齐缺失样本
+        if pred_tokens != gt_tokens:
+            missing = gt_tokens - pred_tokens
+            extra = pred_tokens - gt_tokens
+            print(f'[Eval] GT: {len(gt_tokens)} samples, Pred: {len(pred_tokens)} samples.')
+            if missing:
+                print(f'[Eval] Adding {len(missing)} empty predictions...')
+                for token in missing:
+                    pred_results['results'][token] = []
+            if extra:
+                print(f'[Eval] Removing {len(extra)} extra predictions...')
+                for token in extra:
+                    del pred_results['results'][token]
+            # 写回临时文件
+            import tempfile, os
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix='.json', prefix='nusc_eval_')
+            with os.fdopen(tmp_fd, 'w') as f:
+                json.dump(pred_results, f)
+            result_path = tmp_path
+
+        # 确保 NuScenesEval 的 GT 只加载预测涉及的那些场景
+        import nuscenes.eval.common.loaders as _loaders
+        _orig_create = _loaders.create_splits_scenes
+        _loaders.create_splits_scenes = lambda verbose=False: {
+            'train': [], 'val': list(pred_scene_names), 'test': [],
+            'mini_train': [], 'mini_val': [],
+            'train_detect': [], 'train_track': [],
+        }
+        try:
+            nusc_eval = NuScenesEval(nusc,
+                                     config=self.eval_detection_configs,
+                                     result_path=result_path,
+                                     eval_set=eval_set,
+                                     output_dir=output_dir,
+                                     verbose=False)
+            nusc_eval.main(render_curves=False)
+        finally:
+            _loaders.create_splits_scenes = _orig_create
         # nusc_eval.main(render_curves=True, plot_examples=40)
 
         # record metrics
