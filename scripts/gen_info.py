@@ -150,32 +150,34 @@ MYCRN_DATA = '/home/fxf/projects/BEV_Projects/MyCRN/data'
 
 
 def main():
-    from test_splits import create_balanced_subset, train, val
-
     nusc = NuScenes(version='v1.0-trainval',
                     dataroot='/home/fxf/data/nuScenes/',
                     verbose=True)
     mmcv.mkdir_or_exist(f'{MYCRN_DATA}/info')
 
-    # ===== 1. 全集 pkl (700 train + 150 val) =====
+    # ===== 1. 全集 pkl =====
     print('\n====== 生成全集 pkl ======')
-    train_infos = generate_info(nusc, train)
+    train_infos = generate_info(nusc, splits.train)
     mmcv.dump(train_infos, f'{MYCRN_DATA}/info/nuscenes_infos_train.pkl')
-    val_infos = generate_info(nusc, val)
+    val_infos = generate_info(nusc, splits.val)
     mmcv.dump(val_infos, f'{MYCRN_DATA}/info/nuscenes_infos_val.pkl')
+    print(f'✅ 全集: train {len(train_infos)} / val {len(val_infos)} 样本')
 
-    # ===== 2. 均衡子集 pkl (~233 train + ~50 val) =====
+    # ===== 2. 均衡子集 pkl =====
     print('\n====== 生成均衡子集 pkl ======')
-    sub_train, sub_val = create_balanced_subset(nusc=nusc, verbose=False)
-    sub_train_infos = generate_info(nusc, sub_train)
-    mmcv.dump(sub_train_infos,
-              f'{MYCRN_DATA}/info/nuscenes_infos_sub_train.pkl')
-    sub_val_infos = generate_info(nusc, sub_val)
-    mmcv.dump(sub_val_infos,
-              f'{MYCRN_DATA}/info/nuscenes_infos_sub_val.pkl')
-
-    print(f'\n✅ 全集: train {len(train_infos)} / val {len(val_infos)} 样本')
+    sub_train_infos = generate_info(nusc, splits.train_balanced)
+    mmcv.dump(sub_train_infos, f'{MYCRN_DATA}/info/nuscenes_infos_sub_train.pkl')
+    sub_val_infos = generate_info(nusc, splits.val_balanced)
+    mmcv.dump(sub_val_infos, f'{MYCRN_DATA}/info/nuscenes_infos_sub_val.pkl')
     print(f'✅ 子集: train {len(sub_train_infos)} / val {len(sub_val_infos)} 样本')
+
+    # ===== 3. mini 子集 pkl =====
+    print('\n====== 生成 mini 子集 pkl ======')
+    mini_train_infos = generate_info(nusc, splits.mini_train)
+    mmcv.dump(mini_train_infos, f'{MYCRN_DATA}/info/nuscenes_infos_mini_train.pkl')
+    mini_val_infos = generate_info(nusc, splits.mini_val)
+    mmcv.dump(mini_val_infos, f'{MYCRN_DATA}/info/nuscenes_infos_mini_val.pkl')
+    print(f'✅ mini: train {len(mini_train_infos)} / val {len(mini_val_infos)} 样本')
 
 
 if __name__ == '__main__':
