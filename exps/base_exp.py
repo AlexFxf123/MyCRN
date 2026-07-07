@@ -177,6 +177,7 @@ class BEVDepthLightningModel(LightningModule):
                  bda_aug_conf=bda_aug_conf,
                  rda_aug_conf=rda_aug_conf,
                  default_root_dir='./outputs/',
+                 data_mode='sub',
                  **kwargs):
         super().__init__()
         self.save_hyperparameters()
@@ -212,8 +213,11 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_train.pkl'
-        self.val_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_val.pkl'
+        self.data_mode = data_mode
+        suffix = 'sub' if data_mode == 'sub' else ''
+        infix = f'_{suffix}' if suffix else ''
+        self.train_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos{infix}_train.pkl'
+        self.val_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos{infix}_val.pkl'
         self.predict_info_paths = f'{self.MYCRN_DATA}/info/nuscenes_infos_test_sweep.pkl'
 
         self.return_image = True
@@ -512,4 +516,7 @@ class BEVDepthLightningModel(LightningModule):
 
     @staticmethod
     def add_model_specific_args(parent_parser):  # pragma: no-cover
+        parent_parser.add_argument('--data_mode', type=str, default='sub',
+                                   choices=['full', 'sub'],
+                                   help="Dataset mode: 'full' (全集) or 'sub' (均衡子集, 默认)")
         return parent_parser
