@@ -1,8 +1,4 @@
 # NMyCRN，根据个人使用修改
-在nuScenes数据集上运行CRN模型，调整子集的train和val
-read pkl是从生成的pkl文件中读取信息，并判断当前数据中是否存在相应sample的文件
-read nuscenes是从nuscenes数据集中读取信息，判断当前数据是否存在相应的sample文件，这里用了子集01，共85个scene，因此只循环100次，最终得到子集包含的scene信息
-splits是nuscenes自带的划分train和val的文件，这里根据子集的场景做新的划分
 
 # CRN: Camera Radar Net for Accurate, Robust, Efficient 3D Perception
 
@@ -115,6 +111,8 @@ outputs/
 | `-b`, `--batch-size` | `1` | 每张卡的 batch size |
 | `--max-epochs` | `24` | 训练轮数 |
 | `--gpus` | `1` | GPU 数量 |
+| `--data_mode` | `sub` | 数据集模式：`sub`（均衡子集）或 `full`（全集） |
+| `--eval_interval` | `5` | 每 N 个 epoch 跑一次完整 mAP/NDS 评估（0=禁用） |
 | `--resume` | - | 从最新 checkpoint 恢复训练 |
 | `--train` | - | 训练模式（默认） |
 | `-e` | - | 评估模式 |
@@ -122,32 +120,40 @@ outputs/
 
 **Training (from scratch)**
 ```
-# CRN-R18 (batch_size=1, 24 epochs, 1 GPU)
-python ./exps/det/CRN_r18_256x704_128x128_4key.py -b 1 --gpus 1
+# CRN-R18 (子集, 默认)
+python exps/det/CRN_r18_256x704_128x128_4key.py --train -b 1 --gpus 1
 
-# CRN-R18 (自定义 batch size 和 epoch 数)
-python ./exps/det/CRN_r18_256x704_128x128_4key.py -b 4 --gpus 4 --max-epochs 50
+# CRN-R18 (全集)
+python exps/det/CRN_r18_256x704_128x128_4key.py --train --data_mode full -b 1 --gpus 1
 
-# CRN-R50
-python ./exps/det/CRN_r50_256x704_128x128_4key.py -b 4 --gpus 4
-
-# BEVDepth-R50
-python ./exps/det/BEVDepth_r50_256x704_128x128_4key.py -b 4 --gpus 4
+# CRN-R18 (每 3 个 epoch 评估一次)
+python exps/det/CRN_r18_256x704_128x128_4key.py --train --eval_interval 3 -b 1 --gpus 1
 ```
 
 **Resume training (从最近的 checkpoint 恢复)**
 ```
-python ./exps/det/CRN_r18_256x704_128x128_4key.py --resume -b 1 --gpus 1
+# 自动找最新 checkpoint
+python exps/det/CRN_r18_256x704_128x128_4key.py --train --resume -b 1 --gpus 1
+
+# 从指定 checkpoint 恢复
+python exps/det/CRN_r18_256x704_128x128_4key.py --train \
+    --ckpt_path outputs/r18/lightning_logs/version_3/checkpoints/epoch=2-step=28092.ckpt
 ```
 
 **Evaluation**  
 *Note: use `-b 1 --gpus 1` to measure inference time.*
 ```
-# 指定 checkpoint 评估
-python ./exps/det/CRN_r18_256x704_128x128_4key.py -e --ckpt_path ./outputs/r18/epoch=23-step=100000.ckpt -b 4 --gpus 4
+# 指定 checkpoint 评估（默认使用子集 pkl）
+python exps/det/CRN_r18_256x704_128x128_4key.py -e \
+    --ckpt_path outputs/r18/lightning_logs/version_X/checkpoints/epoch=XX.ckpt
+
+# 评估全集上的结果
+python exps/det/CRN_r18_256x704_128x128_4key.py -e \
+    --data_mode full \
+    --ckpt_path outputs/r18/lightning_logs/version_X/checkpoints/epoch=XX.ckpt
 
 # 自动使用 output dir 中最新的 checkpoint
-python ./exps/det/CRN_r18_256x704_128x128_4key.py -e -b 4 --gpus 4
+python exps/det/CRN_r18_256x704_128x128_4key.py -e -b 4 --gpus 4
 ```
 
 ## Model Zoo

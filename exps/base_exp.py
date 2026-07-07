@@ -168,7 +168,7 @@ class BEVDepthLightningModel(LightningModule):
     def __init__(self,
                  gpus: int = 1,
                  data_root='/home/fxf/data/nuScenes',
-                 eval_interval=1,
+                 eval_interval=5,
                  batch_size_per_device=8,
                  class_names=CLASSES,
                  backbone_img_conf=backbone_img_conf,
@@ -335,6 +335,12 @@ class BEVDepthLightningModel(LightningModule):
             results[i].append(img_metas[i])
         return results
 
+    def on_validation_epoch_start(self):
+        self._do_eval = (self.current_epoch % self.eval_interval == 0)
+        if self._do_eval:
+            self._val_results = []
+            self._val_metas = []
+
     def validation_epoch_end(self, validation_step_outputs):
         detection_losses = list()
         heatmap_losses = list()
@@ -352,8 +358,16 @@ class BEVDepthLightningModel(LightningModule):
         self.log('val/bbox', torch.mean(torch.stack(bbox_losses)), on_epoch=True)
         self.log('val/depth', torch.mean(torch.stack(depth_losses)), on_epoch=True)
 
+        # 每 eval_interval 个 epoch 跑一次完整评估
+        if self._do_eval and len(self._val_results) > 0:
+            print(f'\n[Eval] Epoch {self.current_epoch}: running full evaluation...')
+            synchronize()
+            if self.global_rank == 0:
+                self.evaluator.evaluate(self._val_results, self._val_metas)
+            print(f'[Eval] Epoch {self.current_epoch}: evaluation done.')
+
     def validation_step(self, batch, batch_idx):
-        (sweep_imgs, mats, _, gt_boxes_3d, gt_labels_3d, _, depth_labels, pts_pv) = batch
+        (sweep_imgs, mats, img_metas, gt_boxes_3d, gt_labels_3d, _, depth_labels, pts_pv) = batch
         if torch.cuda.is_available():
             if self.return_image:
                 sweep_imgs = sweep_imgs.cuda()
@@ -374,6 +388,19 @@ class BEVDepthLightningModel(LightningModule):
                 # only key-frame will calculate depth loss
                 depth_labels = depth_labels[:, 0, ...].contiguous()
             loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
+
+            # 每 eval_interval 个 epoch 收集检测结果用于评估
+            if self._do_eval:
+                preds_eval = self(sweep_imgs, mats, pts_pv=pts_pv, is_train=False)
+                results = self.model.get_bboxes(preds_eval, img_metas)
+                for i in range(len(results)):
+                    results[i][0] = results[i][0].tensor.detach().cpu().numpy()
+                    results[i][1] = results[i][1].detach().cpu().numpy()
+                    results[i][2] = results[i][2].detach().cpu().numpy()
+                    results[i].append(img_metas[i])
+                self._val_results.extend([r[:3] for r in results])
+                self._val_metas.extend([r[3] for r in results])
+
         return loss_detection, loss_heatmap, loss_bbox, loss_depth
 
     def test_epoch_end(self, test_step_outputs):
@@ -521,4 +548,6 @@ class BEVDepthLightningModel(LightningModule):
         parent_parser.add_argument('--data_mode', type=str, default='sub',
                                    choices=['full', 'sub'],
                                    help="Dataset mode: 'full' (全集) or 'sub' (均衡子集, 默认)")
+        parent_parser.add_argument('--eval_interval', type=int, default=5,
+                                   help='Run full evaluation every N epochs (default: 5)')
         return parent_parser

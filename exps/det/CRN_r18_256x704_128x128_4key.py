@@ -314,48 +314,5 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         self.log('train/depth', loss_depth)
         return loss_detection + loss_depth
 
-    def validation_epoch_end(self, validation_step_outputs):
-        detection_losses = list()
-        heatmap_losses = list()
-        bbox_losses = list()
-        depth_losses = list()
-        for validation_step_output in validation_step_outputs:
-            detection_losses.append(validation_step_output[0])
-            heatmap_losses.append(validation_step_output[1])
-            bbox_losses.append(validation_step_output[2])
-            depth_losses.append(validation_step_output[3])
-        synchronize()
-
-        self.log('val/detection', torch.mean(torch.stack(detection_losses)), on_epoch=True)
-        self.log('val/heatmap', torch.mean(torch.stack(heatmap_losses)), on_epoch=True)
-        self.log('val/bbox', torch.mean(torch.stack(bbox_losses)), on_epoch=True)
-        self.log('val/depth', torch.mean(torch.stack(depth_losses)), on_epoch=True)
-
-    def validation_step(self, batch, batch_idx):
-        (sweep_imgs, mats, _, gt_boxes_3d, gt_labels_3d, _, depth_labels, pts_pv) = batch
-        if torch.cuda.is_available():
-            if self.return_image:
-                sweep_imgs = sweep_imgs.cuda()
-                for key, value in mats.items():
-                    mats[key] = value.cuda()
-            if self.return_radar_pv:
-                pts_pv = pts_pv.cuda()
-            gt_boxes_3d = [gt_box.cuda() for gt_box in gt_boxes_3d]
-            gt_labels_3d = [gt_label.cuda() for gt_label in gt_labels_3d]
-        with torch.no_grad():
-            preds, depth_preds = self(sweep_imgs, mats,
-                                      pts_pv=pts_pv,
-                                      is_train=True)
-
-            targets = self.model.get_targets(gt_boxes_3d, gt_labels_3d)
-            loss_detection, loss_heatmap, loss_bbox = self.model.loss(targets, preds)
-
-            if len(depth_labels.shape) == 5:
-                # only key-frame will calculate depth loss
-                depth_labels = depth_labels[:, 0, ...].contiguous()
-            loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
-        return loss_detection, loss_heatmap, loss_bbox, loss_depth
-
-
 if __name__ == '__main__':
     run_cli(CRNLightningModel, 'r18')
