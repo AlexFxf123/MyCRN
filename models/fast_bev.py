@@ -7,6 +7,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint as cp
 import numpy as np
 
 from mmcv.cnn import ConvModule
@@ -65,8 +66,10 @@ class FastBEV(nn.Module):
                  n_voxels=[[200, 200, 4]],
                  voxel_size=[[0.5, 0.5, 1.5]],
                  multi_scale_id=[0],
+                 with_cp=True,
                  **kwargs):
         super().__init__()
+        self.with_cp = with_cp
 
         # 多尺度 ResNet backbone
         self.backbone = _MultiScaleResNet(depth=backbone['depth'])
@@ -180,7 +183,7 @@ class FastBEV(nn.Module):
             bev_volume = torch.cat(aligned, dim=1)
 
         # 6. M2BevNeck: [B, Z*C, X, Y] → [B, C_out, Y', X']
-        bev_feat = self.neck_3d(bev_volume)  # list of tensor
+        bev_feat = self.neck_3d(bev_volume)
         if isinstance(bev_feat, list):
             bev_feat = bev_feat[0]
 
@@ -234,9 +237,9 @@ class FastBEV(nn.Module):
             gt_bboxes_3d, gt_labels_3d, gt_bboxes_3d)
 
         # 兼容 CRN 框架的返回格式
-        loss_det = losses.get('positive_bag_loss', torch.tensor(0., device=cls_scores[0].device))
-        loss_hm = torch.tensor(0., device=cls_scores[0].device)
-        loss_bbox = losses.get('negative_bag_loss', torch.tensor(0., device=cls_scores[0].device))
+        loss_det = losses.get('positive_bag_loss', cls_scores[0].new_zeros(1))
+        loss_hm = cls_scores[0].new_zeros(1)
+        loss_bbox = losses.get('negative_bag_loss', cls_scores[0].new_zeros(1))
         return loss_det, loss_hm, loss_bbox
 
     def get_bboxes(self, preds, img_metas):

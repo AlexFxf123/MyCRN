@@ -141,6 +141,7 @@ class FastBEVLightningModel(LightningModule):
             n_voxels=n_voxels,
             voxel_size=voxel_size,
             multi_scale_id=multi_scale_id,
+            with_cp=True,
         )
 
         # 优化器: lr=4e-4, backbone lr_mult=0.1 (匹配原版)

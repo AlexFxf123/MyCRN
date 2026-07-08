@@ -139,14 +139,24 @@ class FreeAnchor3DHead(nn.Module):
         positive_losses = []
 
         # 3. 逐样本计算
-        for batch_id, (anchors_, gt_labels_, gt_bboxes_, cls_prob_,
-                        bbox_preds_, dir_cls_preds_) in enumerate(
-            zip(anchors, gt_labels, gt_bboxes, cls_prob, bbox_preds, dir_cls_preds)):
+        for _, (anchors_, gt_labels_, gt_bboxes_, cls_prob_,
+                bbox_preds_, dir_cls_preds_) in enumerate(
+                    zip(anchors, gt_labels, gt_bboxes, cls_prob, bbox_preds,
+                        dir_cls_preds)):
 
             if hasattr(gt_bboxes_, 'tensor'):
                 gt_bboxes_ = gt_bboxes_.tensor.to(anchors_.device)
             else:
                 gt_bboxes_ = gt_bboxes_.to(anchors_.device)
+                # MyCRN 使用普通 Tensor, 空 GT 时是 1D [0], 对齐原版转为 2D [0, 9]
+                if gt_bboxes_.ndim == 1:
+                    gt_bboxes_ = gt_bboxes_.reshape(-1, self.box_code_size)
+
+            # MyCRN 数据是 [x,y,z,l,w,h,...]，交换 l/w 转为 [x,y,z,w,l,h,...]
+            if gt_bboxes_.size(-1) >= 6:
+                gt_bboxes_ = gt_bboxes_.clone()
+                gt_bboxes_[:, [3, 4]] = gt_bboxes_[:, [4, 3]]
+
             num_anchors = anchors_.size(0)
 
             # ---- 3a. image_box_prob (仅用于 negative loss) ----
@@ -159,35 +169,37 @@ class FreeAnchor3DHead(nn.Module):
                 object_box_prob = ((object_box_iou - t1) / (t2 - t1)).clamp(min=0, max=1)
 
                 num_obj = gt_labels_.size(0)
-                indices = torch.stack(
-                    [torch.arange(num_obj, device=device), gt_labels_], dim=0)
-                object_cls_box_prob = torch.sparse_coo_tensor(
-                    indices, object_box_prob)
-
-                # image_box_prob: P{a_j in A+}, shape: [N, C]
-                box_cls_prob = torch.sparse.sum(
-                    object_cls_box_prob, dim=0).to_dense()  # [C, N]
-
-                nonzero_inds = torch.nonzero(box_cls_prob, as_tuple=False).t()
-                if nonzero_inds.numel() == 0:
+                if num_obj == 0:
+                    # 空 GT: sparse tensor nnz=0 时 sparse.sum(dim) 会报错
                     image_box_prob = torch.zeros(
                         num_anchors, self.num_classes,
                         device=device, dtype=object_box_prob.dtype)
                 else:
-                    # nonzero_inds: [2, K] where each column is (class_id, anchor_id)
-                    classes, anchor_ids = nonzero_inds[0], nonzero_inds[1]
-                    batch_indices = torch.arange(num_obj, device=device)
-                    # For each (c, a) pair, get max over all GTs of class c
-                    nonzero_box_prob = torch.where(
-                        (gt_labels_.unsqueeze(dim=-1) == classes),
-                        object_box_prob[:, anchor_ids],
-                        torch.tensor(0., device=device)
-                    ).max(dim=0).values  # [K]
+                    indices = torch.stack(
+                        [torch.arange(num_obj, device=device), gt_labels_], dim=0)
+                    object_cls_box_prob = torch.sparse_coo_tensor(
+                        indices, object_box_prob)
 
-                    image_box_prob = torch.zeros(
-                        num_anchors, self.num_classes,
-                        device=device, dtype=object_box_prob.dtype)
-                    image_box_prob[anchor_ids, classes] = nonzero_box_prob
+                    box_cls_prob = torch.sparse.sum(
+                        object_cls_box_prob, dim=0).to_dense()
+
+                    nonzero_inds = torch.nonzero(box_cls_prob, as_tuple=False).t()
+                    if nonzero_inds.numel() == 0:
+                        image_box_prob = torch.zeros(
+                            num_anchors, self.num_classes,
+                            device=device, dtype=object_box_prob.dtype)
+                    else:
+                        classes, anchor_ids = nonzero_inds[0], nonzero_inds[1]
+                        nonzero_box_prob = torch.where(
+                            (gt_labels_.unsqueeze(dim=-1) == classes),
+                            object_box_prob[:, anchor_ids],
+                            torch.tensor(0., device=device)
+                        ).max(dim=0).values
+
+                        image_box_prob = torch.zeros(
+                            num_anchors, self.num_classes,
+                            device=device, dtype=object_box_prob.dtype)
+                        image_box_prob[anchor_ids, classes] = nonzero_box_prob
                 box_prob_list.append(image_box_prob)
 
             # ---- 3b. Positive bag ----
@@ -195,19 +207,16 @@ class FreeAnchor3DHead(nn.Module):
             _, matched = torch.topk(match_quality_matrix, self.pre_anchor_topk,
                                     dim=1, sorted=False)
 
-            # matched_cls_prob: P_{ij}^{cls}
             matched_cls_prob = torch.gather(
                 cls_prob_[matched], 2,
                 gt_labels_.view(-1, 1, 1).repeat(1, self.pre_anchor_topk, 1)
             ).squeeze(2)
 
-            # matched_box_prob: P_{ij}^{loc}
             matched_anchors = anchors_[matched]
             matched_object_targets = self.bbox_coder.encode(
                 matched_anchors,
                 gt_bboxes_.unsqueeze(dim=1).expand_as(matched_anchors))
 
-            # Direction loss
             loss_dir = None
             if self.use_direction_classifier:
                 matched_dir_targets = get_direction_target(
@@ -217,7 +226,6 @@ class FreeAnchor3DHead(nn.Module):
                     dir_cls_preds_[matched].transpose(-2, -1),
                     matched_dir_targets, reduction='none')
 
-            # Bbox loss (with diff_rad_by_sin)
             if self.diff_rad_by_sin:
                 pos_preds, matched_object_targets = self.add_sin_difference(
                     bbox_preds_[matched], matched_object_targets)
@@ -245,11 +253,7 @@ class FreeAnchor3DHead(nn.Module):
 
         # ---- 3c. Aggregate ----
         positive_loss = torch.cat(positive_losses).sum() / max(1, num_pos)
-
-        if len(box_prob_list) > 0:
-            box_prob = torch.stack(box_prob_list, dim=0)
-        else:
-            box_prob = cls_prob.new_zeros(0)
+        box_prob = torch.stack(box_prob_list, dim=0)
 
         negative_loss = self.negative_bag_loss(
             cls_prob, box_prob).sum() / max(1, num_pos * self.pre_anchor_topk)
