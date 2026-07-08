@@ -168,7 +168,7 @@ class BEVDepthLightningModel(LightningModule):
     def __init__(self,
                  gpus: int = 1,
                  data_root='/home/fxf/data/nuScenes',
-                 eval_interval=5,
+                 eval_interval=0,
                  batch_size_per_device=8,
                  class_names=CLASSES,
                  backbone_img_conf=backbone_img_conf,
@@ -336,7 +336,7 @@ class BEVDepthLightningModel(LightningModule):
         return results
 
     def on_validation_epoch_start(self):
-        self._do_eval = (self.current_epoch % self.eval_interval == 0)
+        self._do_eval = self.eval_interval > 0 and (self.current_epoch % self.eval_interval == 0)
         if self._do_eval:
             self._val_results = []
             self._val_metas = []
@@ -549,6 +549,6 @@ class BEVDepthLightningModel(LightningModule):
         parent_parser.add_argument('--data_mode', type=str, default='sub',
                                    choices=['full', 'sub', 'mini'],
                                    help="Dataset mode: 'full' (全集), 'sub' (均衡子集, 默认), 'mini' (mini子集)")
-        parent_parser.add_argument('--eval_interval', type=int, default=5,
+        parent_parser.add_argument('--eval_interval', type=int, default=0,
                                    help='Run full evaluation every N epochs (default: 5)')
         return parent_parser

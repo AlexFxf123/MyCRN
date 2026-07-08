@@ -85,7 +85,7 @@ conda run -n CRN python exps/det/CRN_r18_256x704_128x128_4key.py --train [参数
 | `--max-epochs` | `24` | 训练轮数 |
 | `--gpus` | `1` | GPU 数量 |
 | `--data_mode` | `sub` | 数据集：`sub`（均衡子集）、`full`（全集）、`mini`（mini调试） |
-| `--eval_interval` | `5` | 每 N 个 epoch 评估一次 mAP/NDS |
+| `--eval_interval` | `0` | 每 N 个 epoch 评估一次 mAP/NDS, 0表示跳过评估 |
 | `--resume` | - | 从最新 checkpoint 恢复 |
 
 ### 示例
