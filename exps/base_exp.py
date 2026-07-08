@@ -420,6 +420,12 @@ class BEVDepthLightningModel(LightningModule):
         all_img_metas = sum(map(list, zip(*all_gather_object(all_img_metas))),
                             [])[:dataset_length]
         if self.global_rank == 0:
+            # 释放 GPU 显存，防止评估阶段 OOM
+            if torch.cuda.is_available():
+                self.model.cpu()
+                torch.cuda.empty_cache()
+            import gc
+            gc.collect()
             self.evaluator.evaluate(all_pred_results, all_img_metas)
 
     def configure_optimizers(self):
