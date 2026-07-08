@@ -119,7 +119,7 @@ def backproject_inplace(features, points, projection, img_shape):
 
     valid = (x >= 0) & (y >= 0) & (x < W) & (y < H) & (z > 0)
 
-    volume = torch.zeros(C, vx * vy * vz, device=device)
+    volume = torch.zeros(C, vx * vy * vz, device=device, dtype=features.dtype)
     for i in range(n_cam):
         mask = valid[i]
         volume[:, mask] = features[i, :, y[i, mask], x[i, mask]]

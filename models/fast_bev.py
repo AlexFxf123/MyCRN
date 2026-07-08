@@ -32,9 +32,9 @@ class FPN(nn.Module):
     def forward(self, inputs):
         """inputs: 多尺度特征列表 [P2, P3, P4, P5]"""
         laterals = [conv(inp) for conv, inp in zip(self.lateral_convs, inputs)]
-        # Top-down 路径
+        # Top-down 路径 (避免 in-place 操作破坏梯度)
         for i in range(len(laterals) - 1, 0, -1):
-            laterals[i - 1] += F.interpolate(laterals[i], size=laterals[i - 1].shape[2:], mode='bilinear')
+            laterals[i - 1] = laterals[i - 1] + F.interpolate(laterals[i], size=laterals[i - 1].shape[2:], mode='bilinear')
         outs = [conv(lat) for conv, lat in zip(self.fpn_convs, laterals)]
         # Extra levels
         if len(outs) < self.num_outs:
@@ -222,27 +222,30 @@ class FastBEV(nn.Module):
     def loss(self, targets, preds):
         """兼容框架的 loss 接口。
 
-        preds: (cls_scores, bbox_preds, dir_cls_preds), depth_preds
+        preds: (cls_scores, bbox_preds, dir_cls_preds)
         targets: dict
         """
-        (cls_scores, bbox_preds, dir_cls_preds), _ = preds
+        cls_scores, bbox_preds, dir_cls_preds = preds
         gt_bboxes_3d = targets['gt_bboxes_3d']
         gt_labels_3d = targets['gt_labels_3d']
 
         losses = self.bbox_head.loss(
-            [cls_scores], [bbox_preds], [dir_cls_preds],
-            gt_bboxes_3d, gt_labels_3d, None)
+            cls_scores, bbox_preds, dir_cls_preds,
+            gt_bboxes_3d, gt_labels_3d, gt_bboxes_3d)
 
         # 兼容 CRN 框架的返回格式
-        loss_det = losses.get('loss_cls', torch.tensor(0., device=cls_scores.device))
-        loss_hm = torch.tensor(0., device=cls_scores.device)
-        loss_bbox = losses.get('loss_bbox', torch.tensor(0., device=cls_scores.device))
+        loss_det = losses.get('positive_bag_loss', torch.tensor(0., device=cls_scores[0].device))
+        loss_hm = torch.tensor(0., device=cls_scores[0].device)
+        loss_bbox = losses.get('negative_bag_loss', torch.tensor(0., device=cls_scores[0].device))
         return loss_det, loss_hm, loss_bbox
 
     def get_bboxes(self, preds, img_metas):
-        """将模型输出解码为边界框。"""
+        """将模型输出解码为边界框。
+        preds: (cls_scores, bbox_preds, dir_cls_preds)
+            每个元素是 list of [B, A*C, H, W] per level
+        """
         cls_scores, bbox_preds, dir_cls_preds = preds
-        return self.bbox_head.get_bboxes([cls_scores], [bbox_preds], [dir_cls_preds], img_metas)
+        return self.bbox_head.get_bboxes(cls_scores, bbox_preds, dir_cls_preds, img_metas)
 
 
 class _MultiScaleResNet(nn.Module):
