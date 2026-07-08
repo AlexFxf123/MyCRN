@@ -87,8 +87,8 @@ class FastBEV(nn.Module):
             else:
                 fuse_in = in_c
             self.neck_fuse.append(
-                ConvModule(fuse_in, neck_fuse['out_channels'][i] if isinstance(neck_fuse['out_channels'], list) else neck_fuse['out_channels'],
-                           3, padding=1, norm_cfg=dict(type='BN'), act_cfg=dict(type='ReLU')))
+                nn.Conv2d(fuse_in, neck_fuse['out_channels'][i] if isinstance(neck_fuse['out_channels'], list) else neck_fuse['out_channels'],
+                          3, padding=1))
 
         # M2BevNeck
         self.neck_3d = M2BevNeck(**neck_3d)

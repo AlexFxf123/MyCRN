@@ -143,3 +143,13 @@ def run_cli(model_class=BEVDepthLightningModel,
             print(f'[Info] Resuming training from checkpoint: {resume_ckpt}')
 
         trainer.fit(model, ckpt_path=resume_ckpt)
+
+        # ====== 训练完成后自动评估 ======
+        print(f'\n[AutoEval] 训练完成，自动在验证集上评估...')
+        best_ckpt = find_latest_checkpoint(default_root_dir)
+        if best_ckpt is not None:
+            print(f'[AutoEval] 使用 checkpoint: {best_ckpt}')
+            trainer.test(model, ckpt_path=best_ckpt)
+            print(f'[AutoEval] 评估完成，结果已保存至 {default_root_dir}')
+        else:
+            print(f'[AutoEval] 未找到 checkpoint，跳过评估。')

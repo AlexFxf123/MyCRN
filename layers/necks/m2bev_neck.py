@@ -45,21 +45,23 @@ class M2BevNeck(nn.Module):
         # fuse 可选: 1x1 卷积降维
         self.fuse = None
         if fuse is not None:
-            self.fuse = ConvModule(fuse['in_channels'], fuse['out_channels'], 1,
-                                   norm_cfg=norm_cfg, act_cfg=dict(type='ReLU'))
+            self.fuse = nn.Conv2d(fuse['in_channels'], fuse['out_channels'], kernel_size=1)
 
-        layers = []
+        # 对齐原版 M2BevNeck 架构:
+        #   ResModule2D(in_channels) → Conv(in→out, stride=2) →
+        #   [ResModule2D(out_channels) → Conv(out→out, stride=1)] × num_layers
         in_c = fuse['out_channels'] if fuse else in_channels
+        model = []
+        model.append(ResModule2D(in_c, norm_cfg))
+        model.append(nn.Conv2d(in_c, out_channels, 3, stride=stride, padding=1))
+        model.append(nn.BatchNorm2d(out_channels))
+        model.append(nn.ReLU(inplace=True))
         for i in range(num_layers):
-            layers.append(ResModule2D(in_c, norm_cfg))
-            layers.append(nn.Conv2d(in_c, in_c, 3, stride=stride if i == 0 else 1, padding=1))
-            layers.append(nn.BatchNorm2d(in_c))
-            layers.append(nn.ReLU(inplace=True))
-        # 最后一层输出通道
-        layers.append(nn.Conv2d(in_c, out_channels, 3, padding=1))
-        layers.append(nn.BatchNorm2d(out_channels))
-        layers.append(nn.ReLU(inplace=True))
-        self.model = nn.Sequential(*layers)
+            model.append(ResModule2D(out_channels, norm_cfg))
+            model.append(nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
+            model.append(nn.BatchNorm2d(out_channels))
+            model.append(nn.ReLU(inplace=True))
+        self.model = nn.Sequential(*model)
 
     def forward(self, x):
         """x: [N, C, X, Y, Z] 或 [N, C, X, Y]"""

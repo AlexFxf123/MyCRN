@@ -66,11 +66,11 @@ class FreeAnchor3DHead(nn.Module):
                 ConvModule(in_channels, feat_channels, 3, padding=1))
 
         self.conv_cls = nn.Conv2d(feat_channels,
-                                  self.num_anchors * num_classes, 3, padding=1)
+                                  self.num_anchors * num_classes, 1)
         self.conv_reg = nn.Conv2d(feat_channels,
-                                  self.num_anchors * self.box_code_size, 3, padding=1)
+                                  self.num_anchors * self.box_code_size, 1)
         self.conv_dir_cls = nn.Conv2d(feat_channels,
-                                      self.num_anchors * 2, 3, padding=1)
+                                      self.num_anchors * 2, 1)
 
     def forward(self, feats):
         return multi_apply(self.forward_single, feats)
