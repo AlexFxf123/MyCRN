@@ -122,6 +122,61 @@ def detect_arch(model):
 def print_sep(title):
     print(f"\n{'='*60}\n{title}\n{'='*60}")
 
+
+# ─── Conv+BN 融合工具函数 (模块级, 可被外部导入) ─────────────
+def fuse_conv_bn_pair(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
+    """融合 Conv2d + BatchNorm2d → 新的 Conv2d (推理等价)"""
+    assert conv.out_channels == bn.num_features, \
+        f"通道不匹配: Conv({conv.out_channels}) vs BN({bn.num_features})"
+    fused = nn.Conv2d(
+        conv.in_channels, conv.out_channels, conv.kernel_size,
+        stride=conv.stride, padding=conv.padding, dilation=conv.dilation,
+        groups=conv.groups, bias=True,
+    )
+    w = conv.weight
+    if conv.groups > 1:
+        g = conv.groups
+        oc_per_g = conv.out_channels // g
+        ic_per_g = conv.in_channels // g
+        w = w.view(g, oc_per_g, ic_per_g, *conv.kernel_size)
+        bn_w = bn.weight.view(g, oc_per_g, 1, 1, 1)
+        bn_b = bn.bias.view(g, oc_per_g, 1, 1, 1)
+        bn_rm = bn.running_mean.view(g, oc_per_g, 1, 1, 1)
+        bn_rv = bn.running_var.view(g, oc_per_g, 1, 1, 1)
+    else:
+        bn_w = bn.weight.view(-1, 1, 1, 1)
+        bn_b = bn.bias.view(-1, 1, 1, 1)
+        bn_rm = bn.running_mean.view(-1, 1, 1, 1)
+        bn_rv = bn.running_var.view(-1, 1, 1, 1)
+    fused.weight = nn.Parameter(w * bn_w / torch.sqrt(bn_rv + bn.eps))
+    conv_bias = conv.bias if conv.bias is not None else torch.zeros_like(bn.running_mean)
+    fused.bias = nn.Parameter(
+        bn.bias + (conv_bias - bn.running_mean) * bn.weight / torch.sqrt(bn.running_var + bn.eps)
+    )
+    return fused
+
+
+def fuse_all_conv_bn(module):
+    """递归遍历模型, 融合所有 Conv2d + BatchNorm2d 连续对 (原地修改)"""
+    replacements = {}
+    children = list(module.named_children())
+    for i, (name, child) in enumerate(children):
+        cls = type(child)
+        if cls in (nn.ConvTranspose2d,):
+            fuse_all_conv_bn(child)
+            continue
+        if cls == nn.Conv2d and i + 1 < len(children):
+            next_name, next_child = children[i + 1]
+            if isinstance(next_child, nn.BatchNorm2d) and \
+               child.out_channels == next_child.num_features:
+                replacements[name] = fuse_conv_bn_pair(child, next_child)
+                replacements[next_name] = nn.Identity()
+        if cls != nn.Identity:
+            fuse_all_conv_bn(child)
+    for name, new_child in replacements.items():
+        setattr(module, name, new_child)
+
+
 skip_steps = [int(s) for s in args.skip_steps]
 
 # =====================================================================
@@ -322,7 +377,7 @@ if 3 not in skip_steps and not args.no_export:
         out = out / cnt.clamp(min=1)
         return out.view(B, H, W, C).permute(0, 3, 1, 2)
 
-    # ─── 3b. DCN → Conv2d ──────────────────────────────────
+    # ─── 3c. DCN → Conv2d ──────────────────────────────────
     def _replace_dcn_with_conv(module):
         """递归替换 DCN (DeformableConv2d) 为标准 Conv2d"""
         replacements = {}
@@ -432,6 +487,9 @@ if 3 not in skip_steps and not args.no_export:
 
         print("  [patch] 替换 DCN → Conv2d ...")
         _replace_dcn_with_conv(m)
+
+        print("  [optimize] Conv+BN 融合 ...")
+        fuse_all_conv_bn(m)
 
         print("  [patch] 替换 Fuser 注意力层 → 恒等版 ...")
         class PlaceholderAttn(nn.Module):
