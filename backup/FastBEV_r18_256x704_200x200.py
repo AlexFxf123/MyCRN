@@ -1,5 +1,5 @@
 """Fast-BEV M0 (R18, 256x704, 200x200 BEV)
-移植到 MyCRN 框架。
+移植到 MyCRN 框架，暂时用不到，先放到 backup 目录下。
 
 参考: https://github.com/Sense-GVT/Fast-BEV (v1 style, single scale)
 """
