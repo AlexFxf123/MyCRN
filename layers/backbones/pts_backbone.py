@@ -6,6 +6,8 @@ from mmcv.cnn import bias_init_with_prob
 from mmcv.ops import Voxelization
 from mmdet3d.models import builder
 
+from layers.backbones.fast_pts_voxel_encoder import FastPtsVoxelEncoder
+
 
 class PtsBackbone(nn.Module):
     """Pillar Feature Net.
@@ -46,9 +48,20 @@ class PtsBackbone(nn.Module):
                  ):
         super(PtsBackbone, self).__init__()
 
-        self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
-        self.pts_voxel_encoder = builder.build_voxel_encoder(pts_voxel_encoder)
-        self.pts_middle_encoder = builder.build_middle_encoder(pts_middle_encoder)
+        # Switch between original (Voxelization + PillarFeatureNet + PointPillarsScatter)
+        # and fast (pure-PyTorch, mathematically equivalent) implementation.
+        self.use_fast_voxel_encoding = kwargs.pop('use_fast_voxel_encoding', False)
+
+        if self.use_fast_voxel_encoding:
+            self.pts_voxel_layer = None
+            self.pts_voxel_encoder = None
+            self.pts_middle_encoder = None
+            self.fast_voxel_encoder = FastPtsVoxelEncoder(
+                pts_voxel_layer, pts_voxel_encoder, pts_middle_encoder)
+        else:
+            self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
+            self.pts_voxel_encoder = builder.build_voxel_encoder(pts_voxel_encoder)
+            self.pts_middle_encoder = builder.build_middle_encoder(pts_middle_encoder)
         self.pts_backbone = builder.build_backbone(pts_backbone)
         self.return_context = return_context
         self.return_occupancy = return_occupancy
@@ -144,14 +157,23 @@ class PtsBackbone(nn.Module):
         batch_size = B * N
         pts = pts.contiguous().view(B*N, P, F)
 
-        voxels, num_points, coors = self.voxelize(pts)
+        if self.use_fast_voxel_encoding:
+            # Fast path: single call replaces Voxelization + PillarFeatureNet + PointPillarsScatter
+            x = self.fast_voxel_encoder(pts)
+        else:
+            # Original path
+            voxels, num_points, coors = self.voxelize(pts)
+            if self.times is not None:
+                t2.record()
+                torch.cuda.synchronize()
+                self.times['pts_voxelize'].append(t1.elapsed_time(t2))
+
+            voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+            x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+
         if self.times is not None:
             t2.record()
             torch.cuda.synchronize()
-            self.times['pts_voxelize'].append(t1.elapsed_time(t2))
-
-        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
-        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
         x = self.pts_backbone(x)
         if self.pts_neck is not None:
             x = self.pts_neck(x)
