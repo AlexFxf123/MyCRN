@@ -1,7 +1,10 @@
+import torch
+import torch.nn.functional as F
 import mmcv
 
 from models.base_bev_depth import BaseBEVDepth
 from layers.backbones.rvt_lss_fpn import RVTLSSFPN
+from layers.backbones.lss_bev_backbone import LSSBEVBackbone
 from layers.backbones.pts_backbone import PtsBackbone
 from layers.fuser.multimodal_feature_aggregation import MFAFuser
 from layers.fuser.conv_fuser import ConvFuser
@@ -25,8 +28,18 @@ class CameraRadarNetDet(BaseBEVDepth):
 
     def __init__(self, backbone_img_conf, backbone_pts_conf, fuser_conf, head_conf):
         super(BaseBEVDepth, self).__init__()
-        self.backbone_img = RVTLSSFPN(**backbone_img_conf)              # 图像骨干网络
+
+        # 图像骨干网络 — 根据type字段选择
+        backbone_img_type = backbone_img_conf.pop('type', 'RVTLSSFPN')
+        if backbone_img_type == 'LSSBEVBackbone':
+            self.backbone_img = LSSBEVBackbone(**backbone_img_conf)
+            self.separate_pts_branch = True  # 图像/点云分支独立输出，外部拼接
+        else:
+            self.backbone_img = RVTLSSFPN(**backbone_img_conf)
+            self.separate_pts_branch = False  # 图像分支内部已融合点云（RVT）
+
         self.backbone_pts = PtsBackbone(**backbone_pts_conf)            # 点云骨干网络
+
         fuser_type = fuser_conf.pop('type', 'MFAFuser')                # 融合模块类型
         if fuser_type == 'ConvFuser':
             self.fuser = ConvFuser(**fuser_conf)                       # 卷积融合模块
@@ -34,7 +47,8 @@ class CameraRadarNetDet(BaseBEVDepth):
             self.fuser = MFAFuser(**fuser_conf)                        # 注意力融合模块
         self.head = BEVDepthHead(**head_conf)                           # 检测头
 
-        self.radar_view_transform = backbone_img_conf['radar_view_transform']
+        if not self.separate_pts_branch:
+            self.radar_view_transform = backbone_img_conf['radar_view_transform']
 
         # inference time measurement
         self.idx = 0
@@ -91,12 +105,36 @@ class CameraRadarNetDet(BaseBEVDepth):
         if is_train:
             self.time = None
 
-            ptss_context, ptss_occupancy, _ = self.backbone_pts(sweep_ptss)
-            feats, depth, _ = self.backbone_img(sweep_imgs,
-                                                mats_dict,
-                                                ptss_context,
-                                                ptss_occupancy,
-                                                return_depth=True)
+            if self.separate_pts_branch:
+                # ── LSSBEVBackbone: 图像/点云分支独立 ──
+                ptss_context, _, _ = self.backbone_pts(sweep_ptss)
+                img_bev_feats, depth, _ = self.backbone_img(
+                    sweep_imgs, mats_dict, return_depth=True)
+                # img_bev_feats: (B, S, 80, H_bev, W_bev)
+                # ptss_context:  (B*N, S, 80, H_pts, W_pts)
+
+                BN, S, C_pts, H_pts, W_pts = ptss_context.shape
+                B_img = sweep_imgs.shape[0]
+                N = BN // B_img
+                _, _, _, H_bev, W_bev = img_bev_feats.shape
+
+                # 展平 BN×S 做插值，再 reshape 回来
+                pts_bev = ptss_context.flatten(0, 1).contiguous()  # (BN*S, C, H_pts, W_pts)
+                pts_bev = F.interpolate(
+                    pts_bev, size=(H_bev, W_bev),
+                    mode='bilinear', align_corners=False)
+                pts_bev = pts_bev.view(B_img, N, S, -1, H_bev, W_bev)  # (B, N, S, C, H, W)
+                pts_bev = pts_bev.mean(dim=1)  # (B, S, C, H, W) — 平均所有相机
+
+                feats = torch.cat([img_bev_feats, pts_bev], dim=2)
+            else:
+                # ── RVTLSSFPN: 图像分支内部融合点云（RVT） ──
+                ptss_context, ptss_occupancy, _ = self.backbone_pts(sweep_ptss)
+                feats, depth, _ = self.backbone_img(sweep_imgs,
+                                                    mats_dict,
+                                                    ptss_context,
+                                                    ptss_occupancy,
+                                                    return_depth=True)
             fused, _ = self.fuser(feats)
             preds, _ = self.head(fused)
             return preds, depth
@@ -108,11 +146,32 @@ class CameraRadarNetDet(BaseBEVDepth):
 
             ptss_context, ptss_occupancy, self.times = self.backbone_pts(sweep_ptss,
                                                                          times=self.times)
-            feats, self.times = self.backbone_img(sweep_imgs,
-                                                  mats_dict,
-                                                  ptss_context,
-                                                  ptss_occupancy,
-                                                  times=self.times)
+
+            if self.separate_pts_branch:
+                # ── LSSBEVBackbone: 图像分支独立 ──
+                img_bev_feats, self.times = self.backbone_img(
+                    sweep_imgs, mats_dict, times=self.times)
+
+                BN, S_pts, C_pts, H_pts, W_pts = ptss_context.shape
+                B_img = sweep_imgs.shape[0]
+                N = BN // B_img
+                _, _, _, H_bev, W_bev = img_bev_feats.shape
+
+                pts_bev = ptss_context.flatten(0, 1).contiguous()
+                pts_bev = F.interpolate(
+                    pts_bev, size=(H_bev, W_bev),
+                    mode='bilinear', align_corners=False)
+                pts_bev = pts_bev.view(B_img, N, S_pts, -1, H_bev, W_bev)
+                pts_bev = pts_bev.mean(dim=1)
+
+                feats = torch.cat([img_bev_feats, pts_bev], dim=2)
+            else:
+                # ── RVTLSSFPN: 图像分支接收点云 ──
+                feats, self.times = self.backbone_img(sweep_imgs,
+                                                      mats_dict,
+                                                      ptss_context,
+                                                      ptss_occupancy,
+                                                      times=self.times)
             fused, self.times = self.fuser(feats, times=self.times)
             preds, self.times = self.head(fused, times=self.times)
 
