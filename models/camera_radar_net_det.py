@@ -4,6 +4,7 @@ from models.base_bev_depth import BaseBEVDepth
 from layers.backbones.rvt_lss_fpn import RVTLSSFPN
 from layers.backbones.pts_backbone import PtsBackbone
 from layers.fuser.multimodal_feature_aggregation import MFAFuser
+from layers.fuser.conv_fuser import ConvFuser
 from layers.heads.bev_depth_head_det import BEVDepthHead
 
 logger = mmcv.utils.get_logger('mmdet')
@@ -26,7 +27,11 @@ class CameraRadarNetDet(BaseBEVDepth):
         super(BaseBEVDepth, self).__init__()
         self.backbone_img = RVTLSSFPN(**backbone_img_conf)              # 图像骨干网络
         self.backbone_pts = PtsBackbone(**backbone_pts_conf)            # 点云骨干网络
-        self.fuser = MFAFuser(**fuser_conf)                             # 多模态特征融合模块        
+        fuser_type = fuser_conf.pop('type', 'MFAFuser')                # 融合模块类型
+        if fuser_type == 'ConvFuser':
+            self.fuser = ConvFuser(**fuser_conf)                       # 卷积融合模块
+        else:
+            self.fuser = MFAFuser(**fuser_conf)                        # 注意力融合模块
         self.head = BEVDepthHead(**head_conf)                           # 检测头
 
         self.radar_view_transform = backbone_img_conf['radar_view_transform']
@@ -114,27 +119,36 @@ class CameraRadarNetDet(BaseBEVDepth):
             if self.idx == 1000:
                 time_mean = {}
                 for k, v in self.times.items():
-                    time_mean[k] = sum(v) / len(v)
-                print('img: %.2f' % time_mean['img'])
-                print('  img_backbone: %.2f' % time_mean['img_backbone'])
-                print('  img_dep: %.2f' % time_mean['img_dep'])
-                print('  img_transform: %.2f' % time_mean['img_transform'])
-                print('  img_pool: %.2f' % time_mean['img_pool'])
-                print('pts: %.2f' % time_mean['pts'])
-                print('  pts_voxelize: %.2f' % time_mean['pts_voxelize'])
-                print('  pts_backbone: %.2f' % time_mean['pts_backbone'])
-                print('  pts_head: %.2f' % time_mean['pts_head'])
-                print('fusion: %.2f' % time_mean['fusion'])
-                print('  fusion_pre: %.2f' % time_mean['fusion_pre'])
-                print('  fusion_layer: %.2f' % time_mean['fusion_layer'])
-                print('  fusion_post: %.2f' % time_mean['fusion_post'])
-                print('head: %.2f' % time_mean['head'])
-                print('  head_backbone: %.2f' % time_mean['head_backbone'])
-                print('  head_head: %.2f' % time_mean['head_head'])
-                total = time_mean['pts'] + time_mean['img'] + time_mean['fusion'] + time_mean['head']
-                print('total: %.2f' % total)
-                print(' ')
-                print('FPS: %.2f' % (1000/total))
+                    if len(v) > 0:
+                        time_mean[k] = sum(v) / len(v)
+
+                def _print_time(key, indent=''):
+                    if key in time_mean:
+                        print('%s%s: %.2f' % (indent, key, time_mean[key]))
+
+                _print_time('img')
+                _print_time('img_backbone', '  ')
+                _print_time('img_dep', '  ')
+                _print_time('img_transform', '  ')
+                _print_time('img_pool', '  ')
+                _print_time('pts')
+                _print_time('pts_voxelize', '  ')
+                _print_time('pts_backbone', '  ')
+                _print_time('pts_head', '  ')
+                _print_time('fusion')
+                _print_time('fusion_pre', '  ')
+                _print_time('fusion_layer', '  ')
+                _print_time('fusion_post', '  ')
+                _print_time('head')
+                _print_time('head_backbone', '  ')
+                _print_time('head_head', '  ')
+
+                total_keys = ['pts', 'img', 'fusion', 'head']
+                if all(k in time_mean for k in total_keys):
+                    total = sum(time_mean[k] for k in total_keys)
+                    print('total: %.2f' % total)
+                    print(' ')
+                    print('FPS: %.2f' % (1000/total))
 
             self.idx += 1
             return preds
