@@ -460,7 +460,8 @@ class BEVDepthLightningModel(LightningModule):
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.batch_size_per_device,
-            num_workers=4,
+            num_workers=4,      # 内存32G，最大支持16，这里设置为8，避免OOM，验证是否加速
+            pin_memory=True,    # 锁页内存，提高cpu->gpu传输效率
             drop_last=True,
             shuffle=False,
             collate_fn=partial(collate_fn,
@@ -496,7 +497,8 @@ class BEVDepthLightningModel(LightningModule):
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
             batch_size=self.batch_size_per_device,
-            num_workers=4,
+            num_workers=4,      # 内存32G，最大支持16，这里设置为8，避免OOM，验证是否加速
+            pin_memory=True,    # 锁页内存，提高cpu->gpu传输效率
             shuffle=False,
             collate_fn=partial(collate_fn,
                                is_return_image=self.return_image,

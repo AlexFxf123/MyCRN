@@ -72,6 +72,7 @@ def run_cli(model_class=BEVDepthLightningModel,
                         num_sanity_val_steps=0,
                         check_val_every_n_epoch=1,
                         gradient_clip_val=5,
+                        accumulate_grad_batches=8,  # 梯度累积，等效于batchsize*n
                         limit_val_batches=1.0,
                         log_every_n_steps=1,
                         enable_checkpointing=True,
