@@ -133,6 +133,10 @@ python exps/det/CRN_r18_256x704_128x128_4key.py -e \
 python exps/det/CRN_r18_256x704_128x128_4key.py --train --data_mode sub --eval_interval 1
 ```
 
+
+### 查看训练log
+tensorboard --logdir ./outputs/r18/lightning_logs/ --bind_all
+
 ## 输出目录
 
 ```

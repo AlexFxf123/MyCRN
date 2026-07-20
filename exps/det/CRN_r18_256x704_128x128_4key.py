@@ -95,7 +95,7 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         ################################################
         self.optimizer_config = dict(           # 优化器配置  
             type='AdamW',                       # 制定优化器为AdamW优化器
-            lr=2e-4,                            # 学习率设置为0.0002
+            lr=1e-4,                            # 学习率设置为0.0002
             weight_decay=1e-4)                  # 权重衰减设置为0.0001
         ################################################
         self.ida_aug_conf = {                   # 图像数据增强配置
@@ -132,7 +132,7 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
                 depth=18,                       # ResNet深度为18层
                 frozen_stages=0,                # 冻结的阶段数
                 out_indices=[0, 1, 2, 3],       # 输出的层索引
-                norm_eval=True,                 # 归一化层进行评估模式，默认False，这里验证效果
+                norm_eval=False,                 # 归一化层进行评估模式，默认False
                 init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18'),  # 预训练模型初始化
             ),
             'img_neck_conf': dict(              # 图像颈部网络配置
@@ -282,6 +282,47 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
     def forward(self, sweep_imgs, mats, is_train=False, **inputs):
         return self.model(sweep_imgs, mats, sweep_ptss=inputs['pts_pv'], is_train=is_train)
 
+    def on_after_backward(self):
+        """每个 training_step backward 完成后自动调用，监控子模块梯度。"""
+        if self.global_step % 50 != 0:      # 每 50 step 打印一次，避免刷屏
+            return
+        grad_groups = {
+            'radar/backbone_pts':       self.model.backbone_pts,
+            'img/depth_net':            self.model.backbone_img.depth_net,
+            'img/img_backbone':         self.model.backbone_img.img_backbone,
+            'img/img_neck':             self.model.backbone_img.img_neck,
+            'fusion/fuser':             self.model.fuser,
+            'head/trunk':               self.model.head.trunk,
+            'head/neck':                self.model.head.neck,
+        }
+        logs = {}
+        for name, module in grad_groups.items():
+            total_norm = 0.0
+            num_params = 0
+            for p in module.parameters():
+                if p.grad is not None:
+                    total_norm += p.grad.data.norm(2).item() ** 2
+                    num_params += 1
+                else:
+                    # 梯度为 None 的参数 —— 关键监控目标
+                    if num_params == 0 and total_norm == 0.0:
+                        total_norm = -1.0  # 标记
+            if total_norm == -1.0:
+                logs[f'grad/{name}'] = 0.0
+                print(f'[Grad] step={self.global_step}  {name}: ❌ ALL params grad=None')
+            else:
+                avg_norm = (total_norm ** 0.5) / max(1, num_params)
+                logs[f'grad/{name}'] = avg_norm
+                if num_params > 0:
+                    zero_grad = sum(1 for p in module.parameters() if p.grad is not None and p.grad.data.norm(2).item() == 0.0)
+                    pct_zero = zero_grad / num_params * 100
+                    if pct_zero > 50:
+                        print(f'[Grad] step={self.global_step}  {name}: avg_norm={avg_norm:.6f}  '
+                              f'⚠️  {zero_grad}/{num_params} params have zero grad ({pct_zero:.0f}%)')
+                    else:
+                        print(f'[Grad] step={self.global_step}  {name}: avg_norm={avg_norm:.6f}')
+        self.log_dict(logs, prog_bar=False)
+
     def training_step(self, batch):
         if self.global_rank == 0:
             for pg in self.trainer.optimizers[0].param_groups:
@@ -308,10 +349,10 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
             depth_labels = depth_labels[:, 0, ...].contiguous()
         loss_depth = self.get_depth_loss(depth_labels.cuda(), depth_preds, weight=3.)
 
-        self.log('train/detection', loss_detection)
-        self.log('train/heatmap', loss_heatmap)
-        self.log('train/bbox', loss_bbox)
-        self.log('train/depth', loss_depth)
+        self.log('train/detection', loss_detection, prog_bar=True)
+        self.log('train/heatmap', loss_heatmap, prog_bar=True)
+        self.log('train/bbox', loss_bbox, prog_bar=True)
+        self.log('train/depth', loss_depth, prog_bar=True)
         return loss_detection + loss_depth
 
 if __name__ == '__main__':
