@@ -132,7 +132,7 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
                 depth=18,                       # ResNet深度为18层
                 frozen_stages=0,                # 冻结的阶段数
                 out_indices=[0, 1, 2, 3],       # 输出的层索引
-                norm_eval=False,                # 归一化层不进行评估模式
+                norm_eval=True,                 # 归一化层进行评估模式，默认False，这里验证效果
                 init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18'),  # 预训练模型初始化
             ),
             'img_neck_conf': dict(              # 图像颈部网络配置
