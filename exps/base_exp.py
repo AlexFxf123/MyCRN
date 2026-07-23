@@ -170,6 +170,7 @@ class BEVDepthLightningModel(LightningModule):
                  data_root='/home/fxf/data/nuScenes',
                  eval_interval=0,
                  batch_size_per_device=8,
+                 eval_batch_size_per_device=1,
                  class_names=CLASSES,
                  backbone_img_conf=backbone_img_conf,
                  head_conf=head_conf,
@@ -186,6 +187,7 @@ class BEVDepthLightningModel(LightningModule):
         self.pretrain_config = pretrain_config
         self.eval_interval = eval_interval
         self.batch_size_per_device = batch_size_per_device
+        self.eval_batch_size_per_device = eval_batch_size_per_device  
         self.data_root = data_root
         self.class_names = class_names
         self.backbone_img_conf = backbone_img_conf
@@ -496,7 +498,7 @@ class BEVDepthLightningModel(LightningModule):
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
-            batch_size=self.batch_size_per_device,
+            batch_size=self.eval_batch_size_per_device,     # 验证集 batch size 和训练集不同，避免显存不足
             num_workers=4,      # 内存32G，最大支持16，这里设置为4，避免OOM，验证是否加速
             pin_memory=True,    # 锁页内存，提高cpu->gpu传输效率
             shuffle=False,

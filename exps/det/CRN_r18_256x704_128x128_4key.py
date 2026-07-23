@@ -92,10 +92,14 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         self.return_image = True                # 是否返回图像特征
         self.return_depth = True                # 是否返回深度信息
         self.return_radar_pv = True             # 是否返回雷达点云鸟瞰图特征
+        self.enable_grad_monitor = False         # 梯度监控开关，设为 False 关闭打印
+        # 预训练权重路径，设为 None 则不加载
+        self.pretrained_pth = '/home/fxf/projects/BEV_Projects/MyCRN/outputs/CRN_r18_256x704_128x128_4key.pth'  
+        # self.pretrained_pth = None         
         ################################################
         self.optimizer_config = dict(           # 优化器配置  
             type='AdamW',                       # 制定优化器为AdamW优化器
-            lr=1e-4,                            # 学习率设置为0.0002
+            lr=1e-5,                            # 学习率设置为0.0002
             weight_decay=1e-4)                  # 权重衰减设置为0.0001
         ################################################
         self.ida_aug_conf = {                   # 图像数据增强配置
@@ -279,11 +283,46 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
                                        self.fuser_conf,
                                        self.head_conf)
 
+        # ====== 加载预训练权重（开关控制） ======
+        if self.pretrained_pth is not None:
+            import os
+            print('=' * 60)
+            print(f'[Info] 正在加载预训练权重: {self.pretrained_pth}')
+            if not os.path.exists(self.pretrained_pth):
+                print(f'[Warning] 预训练权重不存在，跳过加载: {self.pretrained_pth}')
+            else:
+                raw_dict = torch.load(self.pretrained_pth, map_location='cpu')
+                # Lightning checkpoint 格式: 真正的权重在 'state_dict' 键下
+                if 'state_dict' in raw_dict:
+                    state_dict = raw_dict['state_dict']
+                    print(f'[Info] 检测到 Lightning checkpoint 格式, 提取 state_dict, 共 {len(state_dict)} 个 key')
+                else:
+                    state_dict = raw_dict
+                    print(f'[Info] 检测到纯 state_dict 格式, 共 {len(state_dict)} 个 key')
+                # 去掉可能存在的 'model.' 前缀（Lightning 保存的完整模型）
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    key = k.replace('model.', '', 1) if k.startswith('model.') else k
+                    new_state_dict[key] = v
+                missing, unexpected = self.model.load_state_dict(new_state_dict, strict=False)
+                if missing:
+                    print(f'[Info] 未匹配的层（缺失）: {len(missing)} 个')
+                    for m in missing[:5]:
+                        print(f'  - {m}')
+                if unexpected:
+                    print(f'[Info] 多余的层（不加载）: {len(unexpected)} 个')
+                    for u in unexpected[:5]:
+                        print(f'  - {u}')
+                print(f'[Info] 预训练权重加载完成: {self.pretrained_pth}')
+            print('=' * 60)
+
     def forward(self, sweep_imgs, mats, is_train=False, **inputs):
         return self.model(sweep_imgs, mats, sweep_ptss=inputs['pts_pv'], is_train=is_train)
 
     def on_after_backward(self):
         """每个 training_step backward 完成后自动调用，监控子模块梯度。"""
+        if not self.enable_grad_monitor:     # 开关：设为 False 则跳过
+            return
         if self.global_step % 50 != 0:      # 每 50 step 打印一次，避免刷屏
             return
         grad_groups = {

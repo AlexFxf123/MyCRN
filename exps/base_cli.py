@@ -5,7 +5,6 @@ import re
 from argparse import ArgumentParser
 
 import pytorch_lightning as pl
-from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks.model_summary import ModelSummary
 
 from callbacks.ema import EMACallback
@@ -65,13 +64,14 @@ def run_cli(model_class=BEVDepthLightningModel,
     default_root_dir = os.path.join('./outputs/', exp_name)
     parser.set_defaults(profiler='simple',
                         deterministic=False,
-                        max_epochs=24,
-                        batch_size_per_device=2,
+                        max_epochs=16,             # 默认训练 16 个 epoch已经能看出效果
+                        # strategy='ddp',          # 多卡时取消注释
+                        batch_size_per_device=4,
                         gpus=1,
+                        # strategy='ddp_find_unused_parameters_false',
                         num_sanity_val_steps=0,
                         check_val_every_n_epoch=1,
                         gradient_clip_val=5,
-                        accumulate_grad_batches=8,  # 梯度累积，等效于batchsize*n
                         limit_val_batches=1.0,
                         log_every_n_steps=1,
                         enable_checkpointing=True,
@@ -81,22 +81,14 @@ def run_cli(model_class=BEVDepthLightningModel,
     if args.seed is not None:
         pl.seed_everything(args.seed)
 
-    # 从 args 中剥离 strategy，避免传入 model.hparams（DDPStrategy 不可 pickle）
-    strategy = None
-    if args.gpus and args.gpus > 0:
-        strategy = DDPStrategy(find_unused_parameters=True)
-    args_dict = {k: v for k, v in vars(args).items() if k != 'strategy'}
-
-    model = model_class(**args_dict)
-    trainer_kwargs = dict(callbacks=[ModelSummary(max_depth=3)])
-    if strategy is not None:
-        trainer_kwargs['strategy'] = strategy
+    model = model_class(**vars(args))
     if use_ema:
         train_dataloader = model.train_dataloader()
         ema_callback = EMACallback(
             len(train_dataloader.dataset) * args.max_epochs)
-        trainer_kwargs['callbacks'].insert(0, ema_callback)
-    trainer = pl.Trainer.from_argparse_args(args, **trainer_kwargs)
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[ema_callback, ModelSummary(max_depth=3)])
+    else:
+        trainer = pl.Trainer.from_argparse_args(args, callbacks=[ModelSummary(max_depth=3)])
 
     # 确定运行模式
     is_evaluate = args.evaluate
