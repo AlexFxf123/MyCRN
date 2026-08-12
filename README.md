@@ -122,8 +122,8 @@ python tools/eval_nusc.py --data_mode sub
 
 ```bash
 python exps/det/CRN_r18_256x704_128x128_4key.py -e \
-    --ckpt_path outputs/r18/lightning_logs/version_X/checkpoints/epoch=N-step=XXXX.ckpt \
-    --data_mode sub -b 1 --gpus 1
+    --ckpt_path outputs/CRN_r18_256x704_128x128_4key_lr2e-4_batchsize2x8_full/lightning_logs/version_0/checkpoints/epoch=6-step=12313.ckpt \
+    --data_mode full -b 1 --gpus 1
 ```
 
 ### 训练中自动评估

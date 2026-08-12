@@ -171,6 +171,7 @@ class BEVDepthLightningModel(LightningModule):
                  eval_interval=0,
                  batch_size_per_device=8,
                  eval_batch_size_per_device=1,
+                 save_results_json=False,
                  class_names=CLASSES,
                  backbone_img_conf=backbone_img_conf,
                  head_conf=head_conf,
@@ -188,6 +189,7 @@ class BEVDepthLightningModel(LightningModule):
         self.eval_interval = eval_interval
         self.batch_size_per_device = batch_size_per_device
         self.eval_batch_size_per_device = eval_batch_size_per_device  
+        self.save_results_json = save_results_json
         self.data_root = data_root
         self.class_names = class_names
         self.backbone_img_conf = backbone_img_conf
@@ -360,13 +362,32 @@ class BEVDepthLightningModel(LightningModule):
         self.log('val/bbox', torch.mean(torch.stack(bbox_losses)), on_epoch=True)
         self.log('val/depth', torch.mean(torch.stack(depth_losses)), on_epoch=True)
 
-        # 每 eval_interval 个 epoch 跑一次 mAP/NDS 评估
+        # 每 eval_interval 个 epoch 跑一次 mAP/NDS 评估（子进程，防 OOM）
         if self._do_eval and len(self._val_results) > 0:
             mode_name = {'full': '全集', 'sub': '均衡子集', 'mini': 'mini'}.get(self.data_mode, self.data_mode)
             print(f'\n[Eval] Epoch {self.current_epoch}: running {mode_name} evaluation...')
             synchronize()
             if self.global_rank == 0:
-                self.evaluator.evaluate(self._val_results, self._val_metas)
+                import os, subprocess, sys, shutil
+                # 保存结果到 JSON
+                eval_dir = os.path.join(self.default_root_dir, f'eval_epoch_{self.current_epoch}')
+                os.makedirs(eval_dir, exist_ok=True)
+                self.evaluator._format_bbox(self._val_results, self._val_metas, eval_dir)
+                result_json = os.path.join(eval_dir, 'results_nusc.json')
+                if os.path.exists(result_json):
+                    script = os.path.join(os.path.dirname(__file__), '..', 'tools', 'eval_nusc.py')
+                    cmd = f'{sys.executable} {script} --result_path {result_json} --output_dir {eval_dir} --data_mode {self.data_mode}'
+                    print(f'[Eval] 启动子进程评估...')
+                    ret = subprocess.run(cmd, shell=True)
+                    if ret.returncode == 0:
+                        print(f'[Eval] Epoch {self.current_epoch}: 评估完成')
+                    else:
+                        print(f'[Eval] Epoch {self.current_epoch}: 评估异常 (code={ret.returncode})')
+                    # 默认只删大的 results_nusc.json，保留 metrics_summary.json
+                    if not self.save_results_json:
+                        for fname in os.listdir(eval_dir):
+                            if fname == 'results_nusc.json' or fname.endswith('.pdf'):
+                                os.remove(os.path.join(eval_dir, fname))
             print(f'[Eval] Epoch {self.current_epoch}: evaluation done.')
 
     def validation_step(self, batch, batch_idx):
@@ -429,10 +450,17 @@ class BEVDepthLightningModel(LightningModule):
             import gc
             gc.collect()
             self.evaluator.evaluate(all_pred_results, all_img_metas)
+            # 默认只删大的 results_nusc.json，保留 metrics_summary.json
+            if not self.save_results_json:
+                import os
+                for fname in os.listdir(self.default_root_dir):
+                    if fname == 'results_nusc.json' or fname.endswith('.pdf'):
+                        os.remove(os.path.join(self.default_root_dir, fname))
 
     def configure_optimizers(self):
         optimizer = build_optimizer(self.model, self.optimizer_config)
-        scheduler = MultiStepLR(optimizer, [19, 23])
+        # scheduler = MultiStepLR(optimizer, [19, 23])
+        scheduler = MultiStepLR(optimizer, [40, 44])
         return [[optimizer], [scheduler]]
 
     def train_dataloader(self):
@@ -561,4 +589,9 @@ class BEVDepthLightningModel(LightningModule):
                                    help="Dataset mode: 'full' (全集), 'sub' (均衡子集, 默认), 'mini' (mini子集)")
         parent_parser.add_argument('--eval_interval', type=int, default=0,
                                    help='Run full evaluation every N epochs (default: 5)')
+        parent_parser.add_argument('--save-results',
+                                   dest='save_results_json',
+                                   action='store_true',
+                                   default=False,
+                                   help='Save results_nusc.json to disk (default: not save, auto-clean)')
         return parent_parser

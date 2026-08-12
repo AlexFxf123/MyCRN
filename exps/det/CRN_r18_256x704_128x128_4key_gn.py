@@ -1,81 +1,3 @@
-"""
-mAP: 0.4492
-mATE: 0.5236
-mASE: 0.2857
-mAOE: 0.5640
-mAVE: 0.2781
-mAAE: 0.1792
-NDS: 0.5415
-Eval time: 185.7s
-
-Per-class results:
-Object Class	AP	ATE	ASE	AOE	AVE	AAE
-car	0.702	0.312	0.172	0.146	0.306	0.197
-truck	0.406	0.501	0.221	0.153	0.235	0.207
-bus	0.506	0.542	0.210	0.130	0.404	0.178
-trailer	0.227	0.880	0.252	0.600	0.205	0.100
-construction_vehicle	0.133	0.819	0.518	1.251	0.111	0.352
-pedestrian	0.450	0.558	0.291	0.683	0.368	0.174
-motorcycle	0.478	0.413	0.257	0.820	0.425	0.213
-bicycle	0.442	0.409	0.268	1.140	0.171	0.012
-traffic_cone	0.544	0.414	0.378	nan	nan	nan
-barrier	0.604	0.388	0.291	0.153	nan	nan
-
-img: 10.84
-  img_backbone: 3.62
-  img_dep: 1.35
-  img_transform: 5.01
-  img_pool: 0.54
-pts: 8.46
-  pts_voxelize: 1.87
-  pts_backbone: 5.27
-  pts_head: 0.64
-fusion: 6.77
-  fusion_pre: 0.81
-  fusion_layer: 5.31
-  fusion_post: 0.07
-head: 7.97
-  head_backbone: 2.14
-  head_head: 5.83
-total: 34.04
-
-FPS: 29.38
-
-   | Name                                    | Type                      | Params
----------------------------------------------------------------------------------------
-0  | model                                   | CameraRadarNetDet         | 37.2 M
-1  | model.backbone_img                      | RVTLSSFPN                 | 17.0 M
-2  | model.backbone_img.img_backbone         | ResNet                    | 11.2 M
-3  | model.backbone_img.img_neck             | SECONDFPN                 | 246 K
-4  | model.backbone_img.depth_net            | DepthNet                  | 4.8 M
-5  | model.backbone_img.view_aggregation_net | ViewAggregation           | 807 K
-6  | model.backbone_pts                      | PtsBackbone               | 3.1 M
-7  | model.backbone_pts.pts_voxel_layer      | Voxelization              | 0
-8  | model.backbone_pts.pts_voxel_encoder    | PillarFeatureNet          | 2.3 K
-9  | model.backbone_pts.pts_middle_encoder   | PointPillarsScatter       | 0
-10 | model.backbone_pts.pts_backbone         | SECOND                    | 2.7 M
-11 | model.backbone_pts.pts_neck             | SECONDFPN                 | 90.5 K
-12 | model.backbone_pts.pred_context         | Sequential                | 173 K
-13 | model.backbone_pts.pred_occupancy       | Sequential                | 166 K
-14 | model.fuser                             | MFAFuser                  | 1.2 M
-15 | model.fuser.norm_img                    | LayerNorm                 | 160
-16 | model.fuser.norm_pts                    | LayerNorm                 | 160
-17 | model.fuser.input_proj                  | Linear                    | 20.6 K
-18 | model.fuser.positional_encoding         | LearnedPositionalEncoding | 16.4 K
-19 | model.fuser.ffn_layers                  | ModuleList                | 395 K
-20 | model.fuser.norm_layers1                | ModuleList                | 1.5 K
-21 | model.fuser.norm_layers2                | ModuleList                | 1.5 K
-22 | model.fuser.attn_layers                 | ModuleList                | 198 K
-23 | model.fuser.reduce_conv                 | Sequential                | 590 K
-24 | model.head                              | BEVDepthHead              | 15.8 M
-25 | model.head.loss_cls                     | GaussianFocalLoss         | 0
-26 | model.head.loss_bbox                    | L1Loss                    | 0
-27 | model.head.shared_conv                  | ConvModule                | 147 K
-28 | model.head.task_heads                   | ModuleList                | 1.4 M
-29 | model.head.trunk                        | ResNet                    | 11.9 M
-30 | model.head.neck                         | SECONDFPN                 | 2.4 M
----------------------------------------------------------------------------------------
-"""
 import torch
 from utils.torch_dist import synchronize
 
@@ -396,4 +318,4 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         return loss_detection + loss_depth
 
 if __name__ == '__main__':
-    run_cli(CRNLightningModel, 'CRN_r18_256x704_128x128_4key_lr2e-4_batchsize2x8_full')
+    run_cli(CRNLightningModel, 'CRN_r18_256x704_128x128_4key_lr2e-4_batchsize4x8_full')
