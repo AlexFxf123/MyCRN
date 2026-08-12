@@ -7,9 +7,205 @@ from exps.base_exp import BEVDepthLightningModel
 from models.camera_radar_net_det import CameraRadarNetDet
 
 
+def convert_bn_to_gn(model, num_groups, eps=1e-3):
+    """递归将模型中的 BatchNorm(1d/2d) 替换为 GroupNorm。
+
+    仅在本实验文件内运行时替换，不改任何共享源码文件，
+    因此不会影响其它（BN）实验。
+    """
+    import torch.nn as nn
+    for name, child in model.named_children():
+        if isinstance(child, (nn.BatchNorm2d, nn.BatchNorm1d)):
+            num_features = child.num_features
+            g = num_groups
+            # 若通道数无法整除 num_groups，回退到能整除的最大组数（防御性处理）
+            while g > 1 and num_features % g != 0:
+                g -= 1
+            setattr(model, name,
+                    nn.GroupNorm(g, num_features, eps=eps, affine=True))
+        else:
+            convert_bn_to_gn(child, num_groups, eps)
+
+
+# ============================================================
+# 模型配置（模块级，供 __init__ 与外部脚本/测试直接复用，
+# 避免通过 CRNLightningModel() 构造而触发基类的冗余模型）
+# ============================================================
+# GroupNorm 统一分组数（需能整除所有使用 GN 的通道数：32/64/96/128/160/192/256，推荐 16）
+NORM_NUM_GROUP = 16
+
+BACKBONE_IMG_CONF = {              # 图像骨干网络配置
+    'x_bound': [-51.2, 51.2, 0.8],      # X轴范围和分辨率
+    'y_bound': [-51.2, 51.2, 0.8],      # Y轴范围和分辨率
+    'z_bound': [-5, 3, 8],              # Z轴范围和分辨率
+    'd_bound': [2.0, 58.0, 0.8],        # 深度范围和分辨率
+    'final_dim': (256, 704),            # BEV特征图的最终尺寸 (高, 宽)
+    'downsample_factor': 16,            # 下采样因子
+    'img_backbone_conf': dict(          # 图像骨干网络配置
+        type='ResNet',                  # 使用ResNet作为骨干网络
+        depth=18,                       # ResNet深度为18层
+        frozen_stages=0,                # 冻结的阶段数
+        out_indices=[0, 1, 2, 3],       # 输出的层索引
+        norm_eval=False,                 # 归一化层进行评估模式，默认False
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP),   # 归一化改为 GroupNorm（原为 BN）
+        # GN 结构下无法加载 BN 预训练权重（running stats 不匹配），故关闭 Pretrained
+        # 如需保留 conv 预训练可取消注释，会有 warning 但 conv 权重仍可加载
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18'),
+    ),
+    'img_neck_conf': dict(              # 图像颈部网络配置
+        type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
+        in_channels=[64, 128, 256, 512],    # 输入通道数
+        upsample_strides=[0.25, 0.5, 1, 2], # 上采样步长
+        out_channels=[64, 64, 64, 64],      # 输出通道数
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP, eps=1e-3),   # 归一化改为 GroupNorm（原为 BN）
+    ),
+    'depth_net_conf': dict(             # 深度网络配置  
+        in_channels=256,                # 输入通道数
+        mid_channels=256,               # 中间通道数
+        ),
+    'radar_view_transform': True,       # 是否进行雷达视图变换
+    'camera_aware': False,              # 是否使用相机感知模块 
+    'output_channels': 80,              # 输出通道数
+}
+
+BACKBONE_PTS_CONF = {              # 点云骨干网络配置
+    'pts_voxel_layer': dict(            # 点云体素化配置
+        max_num_points=8,               # 每个体素的最大点数
+        voxel_size=[8, 0.4, 2],         # 体素大小
+        point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],    # 点云范围
+        max_voxels=(768, 1024)          # 最大体素数量 (训练, 测试)
+    ),
+    'pts_voxel_encoder': dict(          # 点云体素编码器配置
+        type='PillarFeatureNet',        # 使用PillarFeatureNet作为体素编码器
+        in_channels=5,                  # 输入通道数（点的特征维度）
+        feat_channels=[32, 64],         # 特征提取通道数
+        with_distance=False,            # 是否使用点到雷达原点的距离作为特征
+        with_cluster_center=False,      # 是否使用点到体素中心的偏移作为特征
+        with_voxel_center=True,         # 是否使用点到体素几何中心的偏移作为特征
+        voxel_size=[8, 0.4, 2],         # 体素大小
+        point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],            # 点云范围
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP, eps=1e-3),   # 归一化改为 GroupNorm（原为 BN1d）
+        legacy=True                                             # 兼容旧版本
+    ),
+    'pts_middle_encoder': dict(         # 点云中间编码器配置
+        type='PointPillarsScatter',     # 使用PointPillarsScatter进行散射操作
+        in_channels=64,                 # 输入通道数
+        output_shape=(140, 88)          # 输出特征图的形状 (宽, 高)
+    ),
+    'pts_backbone': dict(               # 点云骨干网络配置
+        type='SECOND',                  # 使用SECOND作为骨干网络
+        in_channels=64,                 # 输入通道数
+        out_channels=[64, 128, 256],    # 各层输出通道数
+        layer_nums=[2, 3, 3],           # 每层卷积块数量
+        layer_strides=[1, 2, 2],        # 每层下采样步长
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP, eps=1e-3),   # 归一化改为 GroupNorm（原为 BN）
+        conv_cfg=dict(type='Conv2d', bias=True, padding_mode='reflect') # 卷积配置 
+    ),
+    'pts_neck': dict(                   # 点云颈部网络配置
+        type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
+        in_channels=[64, 128, 256],     # 输入通道数
+        out_channels=[64, 64, 64],      # 输出通道数
+        upsample_strides=[0.5, 1, 2],   # 上采样步长
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP, eps=1e-3),   # 归一化改为 GroupNorm（原为 BN）
+        upsample_cfg=dict(type='deconv', bias=False),               # 上采样配置
+        use_conv_for_no_stride=True                                 # 是否使用卷积进行无步长上采样
+        ),
+    'out_channels_pts': 80,             # 点云特征输出通道数
+}
+
+FUSER_CONF = {                     # 多模态特征融合配置    
+    'img_dims': 80,                     # 图像特征维度
+    'pts_dims': 80,                     # 点云特征维度
+    'embed_dims': 128,                  # 融合后特征维度
+    'num_layers': 6,                    # 融合层数
+    'num_heads': 4,                     # 多头注意力机制的头数
+    'bev_shape': (128, 128),            # BEV特征图形状 (宽, 高)
+}
+
+HEAD_CONF = {                      # 检测头配置
+    'bev_backbone_conf': dict(          # BEV骨干网络配置
+        type='ResNet',                  # 使用ResNet作为骨干网络
+        in_channels=128,                # 输入通道数
+        depth=18,                       # ResNet深度为18层
+        num_stages=3,                   # 使用的阶段数
+        strides=(1, 2, 2),              # 各阶段的步长
+        dilations=(1, 1, 1),            # 各阶段的膨胀率
+        out_indices=[0, 1, 2],          # 输出的层索引
+        norm_eval=False,                # 归一化层不进行评估模式
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP),   # 归一化改为 GroupNorm（原为 BN）
+        base_channels=128,              # 基础通道数
+    ),
+    'bev_neck_conf': dict(              # BEV颈部网络配置
+        type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
+        in_channels=[128, 128, 256, 512],   # 输入通道数
+        upsample_strides=[1, 2, 4, 8],      # 上采样步长
+        out_channels=[64, 64, 64, 64],      # 输出通道数
+        norm_cfg=dict(type='GN', num_groups=NORM_NUM_GROUP, eps=1e-3),   # 归一化改为 GroupNorm（原为 BN）
+    ),
+    'tasks': [                                              # 任务配置（每个任务对应一类或多类目标检测）
+        dict(num_class=1, class_names=['car']),                 
+        dict(num_class=2, class_names=['truck', 'construction_vehicle']),
+        dict(num_class=2, class_names=['bus', 'trailer']),
+        dict(num_class=1, class_names=['barrier']),
+        dict(num_class=2, class_names=['motorcycle', 'bicycle']),
+        dict(num_class=2, class_names=['pedestrian', 'traffic_cone']),
+    ],
+    'common_heads': dict(                                                   # 公共头配置
+        reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2), vel=(2, 2)),     # 各任务的回归头输出维度
+    'bbox_coder': dict(                                                     # 边界框编码器配置
+        type='CenterPointBBoxCoder',                                        # 使用CenterPointBBoxCoder进行边界框编码
+        post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],          # 后处理中心范围
+        max_num=500,                                                        # 最大检测目标数量  
+        score_threshold=0.01,                                               # 分数阈值        
+        out_size_factor=4,                                                  # 输出尺寸因子     
+        voxel_size=[0.2, 0.2, 8],                                           # 体素大小
+        pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],                         # 点云范围
+        code_size=9,                                                        # 边界框编码大小
+    ),
+    'train_cfg': dict(
+        point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+        grid_size=[512, 512, 1],
+        voxel_size=[0.2, 0.2, 8],
+        out_size_factor=4,
+        dense_reg=1,
+        gaussian_overlap=0.1,
+        max_objs=500,
+        min_radius=2,
+        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    ),
+    'test_cfg': dict(
+        post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+        max_per_img=500,
+        max_pool_nms=False,
+        min_radius=[4, 12, 10, 1, 0.85, 0.175],
+        score_threshold=0.01,
+        out_size_factor=4,
+        voxel_size=[0.2, 0.2, 8],
+        nms_type='circle',
+        pre_max_size=1000,
+        post_max_size=200,
+        nms_thr=0.2,
+    ),
+    'in_channels': 256,  # Equal to bev_neck output_channels.
+    'loss_cls': dict(type='GaussianFocalLoss', reduction='mean'),           # 分类损失配置
+    'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),   # 回归损失配置
+    'gaussian_overlap': 0.1,                                                # 高斯重叠阈值      
+    'min_radius': 2,                                                        # 最小半径
+}
+
+
 class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightningModel基类
     def __init__(self, *args, **kwargs) -> None:    # 初始化函数
         super().__init__(*args, **kwargs)           # 调用父类的初始化函数
+
+        # ====== 数据路径：本机数据统一放在 /home/fxf/data/nuScenes ======
+        # 覆盖基类默认（项目内 data/ 为空），仅对本实验生效，不影响其它 BN 实验
+        self.data_mode = 'full'                       # full 集（nuscenes_infos_train.pkl 无后缀）
+        self.MYCRN_DATA = '/home/fxf/data/nuScenes'   # depth_gt / radar_pv_filter 也在此目录下
+        self.train_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_train.pkl'
+        self.val_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl'
+        # 暂无 test 集 pkl，先用 val 占位；有 test 集后可改回 nuscenes_infos_test_sweep.pkl
+        self.predict_info_paths = '/home/fxf/data/nuScenes/nuscenes_infos_val.pkl'
 
         self.return_image = True                # 是否返回图像特征
         self.return_depth = True                # 是否返回深度信息
@@ -18,6 +214,8 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         # 预训练权重路径，设为 None 则不加载
         # self.pretrained_pth = 'outputs/CRN_r18_256x704_128x128_4key.pth'  
         self.pretrained_pth = None         
+        # GroupNorm 统一分组数（见文件顶部模块级常量 NORM_NUM_GROUP）
+        self.norm_num_group = NORM_NUM_GROUP
         ################################################
         self.optimizer_config = dict(           # 优化器配置  
             type='AdamW',                       # 制定优化器为AdamW优化器
@@ -46,164 +244,25 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
             'flip_dy_ratio': 0.5                # 沿y轴（左右）翻转的概率
         }
         ################################################
-        self.backbone_img_conf = {              # 图像骨干网络配置
-            'x_bound': [-51.2, 51.2, 0.8],      # X轴范围和分辨率
-            'y_bound': [-51.2, 51.2, 0.8],      # Y轴范围和分辨率
-            'z_bound': [-5, 3, 8],              # Z轴范围和分辨率
-            'd_bound': [2.0, 58.0, 0.8],        # 深度范围和分辨率
-            'final_dim': (256, 704),            # BEV特征图的最终尺寸 (高, 宽)
-            'downsample_factor': 16,            # 下采样因子
-            'img_backbone_conf': dict(          # 图像骨干网络配置
-                type='ResNet',                  # 使用ResNet作为骨干网络
-                depth=18,                       # ResNet深度为18层
-                frozen_stages=0,                # 冻结的阶段数
-                out_indices=[0, 1, 2, 3],       # 输出的层索引
-                norm_eval=False,                 # 归一化层进行评估模式，默认False
-                init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18'),  # 预训练模型初始化
-            ),
-            'img_neck_conf': dict(              # 图像颈部网络配置
-                type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
-                in_channels=[64, 128, 256, 512],    # 输入通道数
-                upsample_strides=[0.25, 0.5, 1, 2], # 上采样步长
-                out_channels=[64, 64, 64, 64],      # 输出通道数
-            ),
-            'depth_net_conf': dict(             # 深度网络配置  
-                in_channels=256,                # 输入通道数
-                mid_channels=256,               # 中间通道数
-                ),
-            'radar_view_transform': True,       # 是否进行雷达视图变换
-            'camera_aware': False,              # 是否使用相机感知模块 
-            'output_channels': 80,              # 输出通道数
-        }
+        self.backbone_img_conf = BACKBONE_IMG_CONF      # 配置见文件顶部模块级常量
         ################################################
-        self.backbone_pts_conf = {              # 点云骨干网络配置
-            'pts_voxel_layer': dict(            # 点云体素化配置
-                max_num_points=8,               # 每个体素的最大点数
-                voxel_size=[8, 0.4, 2],         # 体素大小
-                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],    # 点云范围
-                max_voxels=(768, 1024)          # 最大体素数量 (训练, 测试)
-            ),
-            'pts_voxel_encoder': dict(          # 点云体素编码器配置
-                type='PillarFeatureNet',        # 使用PillarFeatureNet作为体素编码器
-                in_channels=5,                  # 输入通道数（点的特征维度）
-                feat_channels=[32, 64],         # 特征提取通道数
-                with_distance=False,            # 是否使用点到雷达原点的距离作为特征
-                with_cluster_center=False,      # 是否使用点到体素中心的偏移作为特征
-                with_voxel_center=True,         # 是否使用点到体素几何中心的偏移作为特征
-                voxel_size=[8, 0.4, 2],         # 体素大小
-                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],            # 点云范围
-                norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),    # 归一化配置   
-                legacy=True                                             # 兼容旧版本
-            ),
-            'pts_middle_encoder': dict(         # 点云中间编码器配置
-                type='PointPillarsScatter',     # 使用PointPillarsScatter进行散射操作
-                in_channels=64,                 # 输入通道数
-                output_shape=(140, 88)          # 输出特征图的形状 (宽, 高)
-            ),
-            'pts_backbone': dict(               # 点云骨干网络配置
-                type='SECOND',                  # 使用SECOND作为骨干网络
-                in_channels=64,                 # 输入通道数
-                out_channels=[64, 128, 256],    # 各层输出通道数
-                layer_nums=[2, 3, 3],           # 每层卷积块数量
-                layer_strides=[1, 2, 2],        # 每层下采样步长
-                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),              # 归一化配置
-                conv_cfg=dict(type='Conv2d', bias=True, padding_mode='reflect') # 卷积配置 
-            ),
-            'pts_neck': dict(                   # 点云颈部网络配置
-                type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
-                in_channels=[64, 128, 256],     # 输入通道数
-                out_channels=[64, 64, 64],      # 输出通道数
-                upsample_strides=[0.5, 1, 2],   # 上采样步长
-                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),          # 归一化配置
-                upsample_cfg=dict(type='deconv', bias=False),               # 上采样配置
-                use_conv_for_no_stride=True                                 # 是否使用卷积进行无步长上采样
-                ),
-            'out_channels_pts': 80,             # 点云特征输出通道数
-        }
+        self.backbone_pts_conf = BACKBONE_PTS_CONF      # 配置见文件顶部模块级常量
         ################################################
-        self.fuser_conf = {                     # 多模态特征融合配置    
-            'img_dims': 80,                     # 图像特征维度
-            'pts_dims': 80,                     # 点云特征维度
-            'embed_dims': 128,                  # 融合后特征维度
-            'num_layers': 6,                    # 融合层数
-            'num_heads': 4,                     # 多头注意力机制的头数
-            'bev_shape': (128, 128),            # BEV特征图形状 (宽, 高)
-        }
+        self.fuser_conf = FUSER_CONF            # 配置见文件顶部模块级常量
         ################################################
-        self.head_conf = {                      # 检测头配置
-            'bev_backbone_conf': dict(          # BEV骨干网络配置
-                type='ResNet',                  # 使用ResNet作为骨干网络
-                in_channels=128,                # 输入通道数
-                depth=18,                       # ResNet深度为18层
-                num_stages=3,                   # 使用的阶段数
-                strides=(1, 2, 2),              # 各阶段的步长
-                dilations=(1, 1, 1),            # 各阶段的膨胀率
-                out_indices=[0, 1, 2],          # 输出的层索引
-                norm_eval=False,                # 归一化层不进行评估模式
-                base_channels=128,              # 基础通道数
-            ),
-            'bev_neck_conf': dict(              # BEV颈部网络配置
-                type='SECONDFPN',               # 使用SECONDFPN作为颈部网络
-                in_channels=[128, 128, 256, 512],   # 输入通道数
-                upsample_strides=[1, 2, 4, 8],      # 上采样步长
-                out_channels=[64, 64, 64, 64]       # 输出通道数
-            ),
-            'tasks': [                                              # 任务配置（每个任务对应一类或多类目标检测）
-                dict(num_class=1, class_names=['car']),                 
-                dict(num_class=2, class_names=['truck', 'construction_vehicle']),
-                dict(num_class=2, class_names=['bus', 'trailer']),
-                dict(num_class=1, class_names=['barrier']),
-                dict(num_class=2, class_names=['motorcycle', 'bicycle']),
-                dict(num_class=2, class_names=['pedestrian', 'traffic_cone']),
-            ],
-            'common_heads': dict(                                                   # 公共头配置
-                reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2), vel=(2, 2)),     # 各任务的回归头输出维度
-            'bbox_coder': dict(                                                     # 边界框编码器配置
-                type='CenterPointBBoxCoder',                                        # 使用CenterPointBBoxCoder进行边界框编码
-                post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],          # 后处理中心范围
-                max_num=500,                                                        # 最大检测目标数量  
-                score_threshold=0.01,                                               # 分数阈值        
-                out_size_factor=4,                                                  # 输出尺寸因子     
-                voxel_size=[0.2, 0.2, 8],                                           # 体素大小
-                pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],                         # 点云范围
-                code_size=9,                                                        # 边界框编码大小
-            ),
-            'train_cfg': dict(
-                point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
-                grid_size=[512, 512, 1],
-                voxel_size=[0.2, 0.2, 8],
-                out_size_factor=4,
-                dense_reg=1,
-                gaussian_overlap=0.1,
-                max_objs=500,
-                min_radius=2,
-                code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            ),
-            'test_cfg': dict(
-                post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-                max_per_img=500,
-                max_pool_nms=False,
-                min_radius=[4, 12, 10, 1, 0.85, 0.175],
-                score_threshold=0.01,
-                out_size_factor=4,
-                voxel_size=[0.2, 0.2, 8],
-                nms_type='circle',
-                pre_max_size=1000,
-                post_max_size=200,
-                nms_thr=0.2,
-            ),
-            'in_channels': 256,  # Equal to bev_neck output_channels.
-            'loss_cls': dict(type='GaussianFocalLoss', reduction='mean'),           # 分类损失配置
-            'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),   # 回归损失配置
-            'gaussian_overlap': 0.1,                                                # 高斯重叠阈值      
-            'min_radius': 2,                                                        # 最小半径
-        }
+        self.head_conf = HEAD_CONF              # 配置见文件顶部模块级常量
         ################################################
         self.key_idxes = [-2, -4, -6]
         self.model = CameraRadarNetDet(self.backbone_img_conf,
                                        self.backbone_pts_conf,
                                        self.fuser_conf,
                                        self.head_conf)
+
+        # ====== 运行时把残留的 BatchNorm 统一替换为 GroupNorm（不改共享源码） ======
+        # 配置文件已通过 norm_cfg 把骨干/neck 换成 GN，这里再处理源码里硬编码的
+        # BatchNorm（depth_net、view_aggregation、pts 预测头、fuser、检测头等），
+        # 使整个模型全部 GN 化，且对其它实验文件零影响。
+        convert_bn_to_gn(self.model, self.norm_num_group)
 
         # ====== 加载预训练权重（开关控制） ======
         if self.pretrained_pth is not None:
@@ -318,4 +377,4 @@ class CRNLightningModel(BEVDepthLightningModel):    # 继承自BEVDepthLightning
         return loss_detection + loss_depth
 
 if __name__ == '__main__':
-    run_cli(CRNLightningModel, 'CRN_r18_256x704_128x128_4key_lr2e-4_batchsize4x8_full')
+    run_cli(CRNLightningModel, 'CRN_r18_256x704_128x128_4key_gn_lr2e-4_batchsize4x4_full')
